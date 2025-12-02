@@ -88,6 +88,11 @@ class BISTTradingBot:
         self._last_market_open_report: Optional[datetime] = None
         self._last_market_close_report: Optional[datetime] = None
         
+        # Günlük tarama takibi (open_close modu için)
+        self._last_open_scan: Optional[datetime] = None
+        self._last_close_scan: Optional[datetime] = None
+        self._startup_scan_done: bool = False
+        
         logger.info("🤖 BİST Trading Bot başlatıldı")
     
     async def initialize(self):
@@ -376,28 +381,23 @@ class BISTTradingBot:
         
         self._last_market_close_report = datetime.now()
     
-    async def scan_all_symbols(self):
-        """Tüm sembolleri tarar ve sinyal üretir"""
+    async def scan_all_symbols(self, is_startup: bool = False):
+        """
+        Tüm sembolleri tarar ve sinyal üretir.
+        
+        Args:
+            is_startup: Bot başlangıcında mı çağrılıyor (piyasa kontrolü atlanır)
+        """
         try:
+            scan_type = "BAŞLANGIÇ" if is_startup else "YENİ"
             logger.info("=" * 60)
-            logger.info(f"🔍 YENİ TARAMA BAŞLIYOR - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"🔍 {scan_type} TARAMA BAŞLIYOR - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info("=" * 60)
             
             self.stats['total_scans'] += 1
             
-            # Veri kesintisi kontrolü
-            self._check_data_outage()
-            
-            # Piyasa açılış raporu (günde bir kez)
-            if self.is_market_opening():
-                await self.send_market_open_report()
-            
-            # Piyasa kapanış raporu (günde bir kez)
-            if self.is_market_closing():
-                await self.send_market_close_report()
-            
-            # Piyasa kontrolü
-            if not self.is_market_open():
+            # Piyasa kontrolü (startup taramasında atla)
+            if not is_startup and not self.is_market_open():
                 logger.info("⏸️  Piyasa kapalı, tarama yapılmıyor")
                 return
             
@@ -487,26 +487,120 @@ class BISTTradingBot:
             except:
                 pass
     
+    def should_scan_at_open(self) -> bool:
+        """
+        Açılış taraması yapılmalı mı kontrol eder.
+        Bugün henüz açılış taraması yapılmadıysa True döner.
+        """
+        if not self.is_market_opening():
+            return False
+        
+        today = datetime.now().date()
+        if self._last_open_scan and self._last_open_scan.date() == today:
+            return False
+        
+        return True
+    
+    def should_scan_at_close(self) -> bool:
+        """
+        Kapanış taraması yapılmalı mı kontrol eder.
+        Bugün henüz kapanış taraması yapılmadıysa True döner.
+        """
+        if not self.is_market_closing():
+            return False
+        
+        today = datetime.now().date()
+        if self._last_close_scan and self._last_close_scan.date() == today:
+            return False
+        
+        return True
+    
+    async def run_startup_analysis(self):
+        """
+        Bot başlarken günlük analiz raporu gönderir.
+        Piyasa durumundan bağımsız olarak çalışır.
+        """
+        if self._startup_scan_done:
+            return
+        
+        logger.info("="*60)
+        logger.info("🚀 BAŞLANGIÇ ANALİZİ")
+        logger.info("="*60)
+        
+        # Provider sağlık durumlarını güncelle
+        await self.provider_manager.update_all_health()
+        
+        # Tarama yap ve rapor gönder
+        await self.scan_all_symbols(is_startup=True)
+        
+        self._startup_scan_done = True
+        logger.info("✅ Başlangıç analizi tamamlandı")
+    
     async def run_scheduler(self):
-        """Zamanlayıcı - belirli aralıklarla tarama yapar"""
-        logger.info(f"⏰ Zamanlayıcı başlatıldı (interval: {config.SCAN_INTERVAL_SECONDS}s)")
+        """
+        Zamanlayıcı - tarama moduna göre çalışır.
+        
+        Modlar:
+        - "open_close": Sadece piyasa açılış ve kapanışında tarama (günde 2x)
+        - "continuous": Sürekli tarama (eski davranış)
+        """
+        scan_mode = getattr(config, 'SCAN_MODE', 'continuous')
+        check_interval = getattr(config, 'MARKET_CHECK_INTERVAL', 60)
+        
+        logger.info(f"⏰ Zamanlayıcı başlatıldı (mod: {scan_mode})")
+        
+        if scan_mode == 'open_close':
+            logger.info("📅 Açılış + Kapanış modu aktif (günde 2 tarama)")
+        else:
+            logger.info(f"🔄 Sürekli tarama modu (her {config.SCAN_INTERVAL_SECONDS}s)")
         
         while not self._shutdown_requested:
             try:
-                await self.scan_all_symbols()
-                
-                # Sonraki taramaya kadar bekle
-                if not self._shutdown_requested:
-                    # Piyasa kapalıysa daha uzun bekle
+                if scan_mode == 'open_close':
+                    # ===== AÇILIŞ + KAPANIŞ MODU =====
+                    
+                    # Açılış taraması
+                    if self.should_scan_at_open():
+                        logger.info("🌅 Piyasa açılışı - tarama başlatılıyor...")
+                        await self.send_market_open_report()
+                        await self.scan_all_symbols()
+                        self._last_open_scan = datetime.now()
+                        logger.info("✅ Açılış taraması tamamlandı")
+                    
+                    # Kapanış taraması
+                    elif self.should_scan_at_close():
+                        logger.info("🌇 Piyasa kapanışı - tarama başlatılıyor...")
+                        await self.scan_all_symbols()
+                        await self.send_market_close_report()
+                        self._last_close_scan = datetime.now()
+                        logger.info("✅ Kapanış taraması tamamlandı")
+                    
+                    # Bekleme
+                    wait_time = check_interval
+                    now = datetime.now()
+                    
+                    # Sonraki tarama zamanını hesapla ve logla
+                    if self.is_market_open():
+                        next_scan = "Kapanış (17:55)"
+                    elif now.hour < config.MARKET_OPEN_HOUR:
+                        next_scan = f"Açılış ({config.MARKET_OPEN_HOUR}:00)"
+                    else:
+                        next_scan = f"Yarın açılış ({config.MARKET_OPEN_HOUR}:00)"
+                    
+                    logger.debug(f"⏳ Sonraki tarama: {next_scan}, kontrol {wait_time}s sonra")
+                    
+                else:
+                    # ===== SÜREKLİ TARAMA MODU (ESKİ DAVRANIŞ) =====
+                    await self.scan_all_symbols()
+                    
                     if self.is_market_open():
                         wait_time = config.SCAN_INTERVAL_SECONDS
                     else:
-                        wait_time = 300  # Piyasa kapalıyken 5 dakikada bir kontrol
-                        logger.info(f"📅 Piyasa kapalı, {wait_time}s sonra kontrol edilecek")
-                    
-                    logger.info(f"😴 {wait_time} saniye bekleniyor...")
-                    
-                    # Bekleme süresini küçük parçalara böl (shutdown için)
+                        wait_time = 300
+                        logger.info(f"📅 Piyasa kapalı, {wait_time}s sonra kontrol")
+                
+                # Bekleme (her iki mod için ortak)
+                if not self._shutdown_requested:
                     for _ in range(wait_time):
                         if self._shutdown_requested:
                             break
@@ -516,13 +610,16 @@ class BISTTradingBot:
                 if self.stats['total_scans'] % 10 == 0:
                     self.cooldown_manager.cleanup_old_entries()
                 
+                # Veri kesintisi kontrolü
+                self._check_data_outage()
+                
             except asyncio.CancelledError:
                 logger.info("⏹️  Scheduler iptal edildi")
                 break
             except Exception as e:
                 logger.error(f"Scheduler hatası: {str(e)}")
                 logger.debug(traceback.format_exc())
-                await asyncio.sleep(60)  # Hata durumunda 1 dakika bekle
+                await asyncio.sleep(60)
     
     def print_stats(self):
         """İstatistikleri yazdırır"""
@@ -625,6 +722,10 @@ async def main():
                             return
                 except:
                     pass  # Non-interactive modda devam et
+        
+        # 🆕 Bot başlarken günlük analiz yap ve rapor gönder
+        logger.info("📊 Başlangıç analizi yapılıyor...")
+        await bot.run_startup_analysis()
         
         # Scheduler'ı başlat
         await bot.run_scheduler()

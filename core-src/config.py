@@ -4,8 +4,14 @@ Tüm bot parametreleri burada merkezi olarak yönetilir
 """
 
 # ================== GENEL AYARLAR ==================
-# Tarama aralığı (saniye)
+# Tarama modu: "continuous" (sürekli), "open_close" (açılış+kapanış)
+SCAN_MODE = "open_close"  # Günlük veri için açılış+kapanış yeterli
+
+# Tarama aralığı (saniye) - sadece continuous modda kullanılır
 SCAN_INTERVAL_SECONDS = 300  # 5 dakika
+
+# Piyasa kontrol aralığı (saniye) - açılış/kapanış beklerken
+MARKET_CHECK_INTERVAL = 60  # 1 dakika
 
 # Çalışma saatleri (Türkiye saati)
 MARKET_OPEN_HOUR = 10

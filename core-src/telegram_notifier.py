@@ -242,7 +242,14 @@ class TelegramNotifier:
         try:
             message = "🚀 *BİST Trading Bot v2.0 (MVP) Başlatıldı!*\n\n"
             message += f"⏰ *Zaman:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            message += f"📊 *Tarama Aralığı:* {config.SCAN_INTERVAL_SECONDS} saniye\n"
+            
+            # Tarama modu
+            scan_mode = getattr(config, 'SCAN_MODE', 'continuous')
+            if scan_mode == 'open_close':
+                message += f"📅 *Tarama Modu:* Açılış + Kapanış (günde 2x)\n"
+            else:
+                message += f"🔄 *Tarama Modu:* Sürekli ({config.SCAN_INTERVAL_SECONDS}s aralıklarla)\n"
+            
             message += f"💰 *Min. Hacim:* {config.MIN_DAILY_TL_VOLUME/1e6:.1f}M TL\n"
             message += f"📈 *STRONG\\_BUY Barajı:* {config.STRONG_BUY_THRESHOLD}/20\n"
             message += f"🔥 *ULTRA\\_BUY Barajı:* {config.ULTRA_BUY_THRESHOLD}/20\n"
@@ -253,7 +260,7 @@ class TelegramNotifier:
                 delay_text = getattr(config, 'DATA_DELAY_WARNING_TEXT', '')
                 message += f"⚠️ {delay_text}\n\n"
             
-            message += "_Bot aktif ve taramaya hazır!_ ✅"
+            message += "_Bot aktif! Başlangıç analizi yapılacak..._"
             
             return self.send_message(message)
         except Exception as e:
