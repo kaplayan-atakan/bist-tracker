@@ -1,0 +1,17 @@
+# BİST Trading Bot - Requirements
+# Python 3.8+ gereklidir
+
+# Veri çekme ve işleme
+pandas>=1.5.0
+numpy>=1.23.0
+yfinance>=0.2.28
+
+# HTTP istekleri (senkron)
+requests>=2.28.0
+
+# Async HTTP ve WebSocket (Sprint 1 - Provider katmanı)
+aiohttp>=3.8.0
+websockets>=11.0.0
+
+# Diğer
+python-dateutil>=2.8.0

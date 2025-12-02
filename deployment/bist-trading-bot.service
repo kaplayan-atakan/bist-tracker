@@ -1,0 +1,38 @@
+[Unit]
+Description=BIST Trading Bot - Automated Stock Scanner
+Documentation=https://github.com/yourusername/bist-tracker
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bist-tracker/core-src
+ExecStart=/home/ubuntu/bist-tracker/venv/bin/python main.py
+Restart=on-failure
+RestartSec=30
+
+# Logging
+StandardOutput=append:/var/log/bist-trading-bot/bot.log
+StandardError=append:/var/log/bist-trading-bot/error.log
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+
+# Load environment variables from file (optional)
+# EnvironmentFile=/home/ubuntu/bist-tracker/.env
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
