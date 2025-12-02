@@ -214,6 +214,11 @@ DATA_FETCH_RETRY_DELAY = 5  # Denemeler arası bekleme (saniye)
 LOG_FILE = 'bist_bot.log'
 LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR
 
+# ================== SEMBOL DOĞRULAMA AYARLARI ==================
+# Sembol listesi doğrulaması
+SYMBOL_VALIDATION_ENABLED = True
+SYMBOL_FALLBACK_TO_HARDCODED = True  # Fetch başarısız olursa hardcoded liste kullan
+
 # ================== KARA LİSTE ==================
 # Tarama dışı bırakılacak semboller
 BLACKLIST_SYMBOLS = [
@@ -221,16 +226,39 @@ BLACKLIST_SYMBOLS = [
 ]
 
 # ================== BİST SEMBOL LİSTESİ ==================
-# Ana BİST hisseleri (yfinance için .IS uzantısı eklenir)
-# Bu listeyi güncel BİST-100 sembolleriyle güncelleyebilirsiniz
+# Doğrulanmış ve yfinance ile çalışan BİST sembolleri
+# Son güncelleme: Aralık 2024
+# Güncelleme için: python -m utils.symbol_fetcher --update-config
 BIST_SYMBOLS = [
-    'THYAO', 'ASELS', 'KCHOL', 'EREGL', 'AKBNK', 'SISE', 'SAHOL', 'GARAN',
-    'ISCTR', 'PETKM', 'TUPRS', 'HALKB', 'BIMAS', 'VAKBN', 'TAVHL', 'YKBNK',
-    'TCELL', 'PGSUS', 'TOASO', 'TTKOM', 'KOZAL', 'KOZAA', 'ARCLK', 'EKGYO',
-    'SODA', 'FROTO', 'AEFES', 'VESBE', 'ODAS', 'DOHOL', 'ENKAI', 'BRSAN',
-    'MGROS', 'ULKER', 'BRISA', 'AYGAZ', 'OTKAR', 'NETAS', 'CCOLA', 'SOKM',
-    'KRDMD', 'AKSA', 'LOGO', 'GESAN', 'ALARK', 'INDES', 'MAVI', 'KARSN',
-    'TURSG', 'KONTR', 'KLMSN', 'EUPWR', 'HEKTS', 'ANACM', 'SISE', 'CIMSA'
+    # Bankacılık
+    'AKBNK', 'GARAN', 'HALKB', 'ISCTR', 'SKBNK', 'TSKB', 'VAKBN', 'YKBNK',
+    # Holding
+    'AGHOL', 'DOHOL', 'GLYHO', 'KCHOL', 'SAHOL',
+    # Havacılık & Savunma
+    'ASELS', 'PGSUS', 'TAVHL', 'THYAO',
+    # Otomotiv
+    'BRISA', 'DOAS', 'FROTO', 'OTKAR', 'TOASO', 'TTRAK',
+    # Enerji
+    'AHGAZ', 'AKSEN', 'AYGAZ', 'ENJSA', 'EUPWR', 'GWIND', 'TUPRS', 'ZOREN',
+    # Teknoloji & Telekomünikasyon
+    'INDES', 'LOGO', 'NETAS', 'TCELL', 'TTKOM',
+    # Perakende
+    'BIMAS', 'MAVI', 'MGROS', 'MPARK', 'SOKM',
+    # Sanayi & Üretim
+    'ARCLK', 'BRSAN', 'EREGL', 'KRDMD', 'SISE', 'VESBE', 'VESTL',
+    # Kimya & Petrokimya
+    'AKSA', 'GUBRF', 'KORDS', 'PETKM', 'SASA',
+    # Gıda & İçecek
+    'AEFES', 'CCOLA', 'TATGD', 'TBORG', 'ULKER',
+    # İnşaat & GYO
+    'EKGYO', 'ENKAI', 'ISGYO', 'PEKGY', 'SNGYO', 'TDGYO',
+    # Madencilik
+    'IPEKE',
+    # Çimento & Yapı Malzemeleri
+    'AKCNS', 'CIMSA', 'GOLTS', 'OYAKC', 'TRKCM',
+    # Diğer Sanayi
+    'ALARK', 'CLEBI', 'GESAN', 'HEKTS', 'ISMEN', 'KARSN', 'KLMSN',
+    'KONTR', 'ODAS', 'TKFEN', 'TURSG',
 ]
 
 # ================== VERI ÇERÇEVESİ AYARLARI ==================

@@ -465,6 +465,95 @@ class TelegramNotifier:
             logger.error(f"Piyasa kapanış raporu gönderme hatası: {str(e)}")
             return False
     
+    def send_status_report(
+        self,
+        market_open: bool,
+        next_open_time: str,
+        provider_health: Dict[str, str],
+        symbol_count: int,
+        bot_version: str = "2.0",
+        last_data_time: Optional[datetime] = None
+    ) -> bool:
+        """
+        Piyasa kapalıyken durum raporu gönderir.
+        
+        Bot başlatıldığında piyasa kapalıysa bu rapor gönderilir.
+        
+        Args:
+            market_open: Piyasa açık mı
+            next_open_time: Sonraki açılış zamanı (örn: "Pazartesi 10:00")
+            provider_health: Provider sağlık durumları
+            symbol_count: Takip edilen sembol sayısı
+            bot_version: Bot versiyonu
+            last_data_time: Son başarılı veri zamanı
+            
+        Returns:
+            bool: Başarılı mı?
+        """
+        try:
+            message = "📊 *BİST Trading Bot - Durum Raporu*\n\n"
+            message += f"⏰ *Zaman:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            
+            # Piyasa durumu
+            if market_open:
+                message += "🟢 *Piyasa Durumu:* AÇIK\n"
+            else:
+                message += "🔴 *Piyasa Durumu:* KAPALI\n"
+                message += f"📅 *Sonraki Açılış:* {next_open_time}\n"
+            
+            message += "\n"
+            
+            # Provider durumları
+            message += "📡 *Veri Kaynakları:*\n"
+            health_emojis = {
+                'healthy': '✅',
+                'degraded': '⚠️',
+                'down': '❌',
+                'unknown': '❓'
+            }
+            
+            # Provider isimlerini düzenle
+            provider_names = {
+                'tradingview_http': 'TradingView HTTP',
+                'tradingview_ws': 'TradingView WS',
+                'yahoo': 'Yahoo Finance',
+                'finnhub': 'Finnhub',
+            }
+            
+            for provider, status in provider_health.items():
+                emoji = health_emojis.get(status, '❓')
+                name = provider_names.get(provider, provider.replace('_', ' ').title())
+                status_text = "Aktif" if status == 'healthy' else "Bağlı" if status == 'degraded' else "Kapalı" if status == 'down' else "Bilinmiyor"
+                message += f"  • {name}: {emoji} {status_text}\n"
+            
+            message += "\n"
+            
+            # Sembol sayısı
+            message += f"📈 *Takip:* {symbol_count} sembol\n"
+            
+            # Veri gecikmesi
+            if getattr(config, 'DATA_DELAY_ENABLED', False):
+                delay_minutes = getattr(config, 'DATA_DELAY_MINUTES', 15)
+                message += f"⏱️ *Veri Gecikmesi:* {delay_minutes} dakika (TradingView free tier)\n"
+            
+            # Son veri zamanı
+            if last_data_time:
+                time_diff = datetime.now() - last_data_time
+                if time_diff.total_seconds() < 3600:
+                    time_str = f"{int(time_diff.total_seconds() / 60)} dakika önce"
+                elif time_diff.total_seconds() < 86400:
+                    time_str = f"{int(time_diff.total_seconds() / 3600)} saat önce"
+                else:
+                    time_str = f"{time_diff.days} gün önce"
+                message += f"📊 *Son Veri:* {time_str}\n"
+            
+            message += f"\n_Bot v{bot_version} hazır, piyasa açılışını bekliyor..._ ⏳"
+            
+            return self.send_message(message)
+        except Exception as e:
+            logger.error(f"Durum raporu gönderme hatası: {str(e)}")
+            return False
+    
     def get_stats(self) -> Dict:
         """İstatistikleri döndürür"""
         return {

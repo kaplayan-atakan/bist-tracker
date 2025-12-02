@@ -189,6 +189,75 @@ class BISTTradingBot:
         
         return close_start <= current_time <= close_end
     
+    def get_next_market_open(self) -> str:
+        """
+        Sonraki piyasa açılış zamanını hesaplar.
+        
+        Returns:
+            str: İnsan okunabilir açılış zamanı
+                - "Bugün 10:00" (hafta içi, saat 10:00'dan önce)
+                - "Yarın 10:00" (hafta içi, saat 18:00'dan sonra, yarın hafta içi)
+                - "Pazartesi 10:00" (hafta sonu veya Cuma kapanıştan sonra)
+        """
+        now = datetime.now()
+        weekday = now.weekday()  # 0=Pazartesi, 6=Pazar
+        current_time = now.time()
+        open_hour = config.MARKET_OPEN_HOUR
+        close_hour = config.MARKET_CLOSE_HOUR
+        
+        # Gün isimleri
+        day_names = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        
+        # Hafta içi ve saat 10:00'dan önce
+        if weekday < 5 and current_time < datetime_time(open_hour, 0):
+            return f"Bugün {open_hour}:00"
+        
+        # Hafta içi ve saat 18:00'dan sonra
+        if weekday < 4 and current_time >= datetime_time(close_hour, 0):
+            # Yarın hafta içi
+            return f"Yarın {open_hour}:00"
+        
+        # Cuma kapanıştan sonra veya hafta sonu
+        if weekday == 4 and current_time >= datetime_time(close_hour, 0):
+            # Cuma kapanıştan sonra -> Pazartesi
+            return f"Pazartesi {open_hour}:00"
+        
+        if weekday == 5:  # Cumartesi
+            return f"Pazartesi {open_hour}:00"
+        
+        if weekday == 6:  # Pazar
+            return f"Yarın {open_hour}:00"  # Pazartesi
+        
+        # Varsayılan (piyasa açıkken)
+        return f"Bugün {open_hour}:00"
+    
+    async def send_market_closed_status_report(self):
+        """
+        Piyasa kapalıyken durum raporu gönderir.
+        Bot başlatıldığında piyasa kapalıysa bu rapor gönderilir.
+        """
+        logger.info("📊 Piyasa kapalı durum raporu hazırlanıyor...")
+        
+        # Provider sağlık durumlarını güncelle
+        await self.provider_manager.update_all_health()
+        
+        # Rapor verilerini hazırla
+        provider_health = self.provider_manager.get_health_summary()
+        symbol_count = len(self.get_symbol_list())
+        next_open = self.get_next_market_open()
+        
+        # Raporu gönder
+        self.telegram_notifier.send_status_report(
+            market_open=False,
+            next_open_time=next_open,
+            provider_health=provider_health,
+            symbol_count=symbol_count,
+            bot_version="2.0",
+            last_data_time=self._last_successful_data_time
+        )
+        
+        logger.info(f"✅ Durum raporu gönderildi (Sonraki açılış: {next_open})")
+    
     def _record_successful_data_fetch(self):
         """Başarılı veri çekme zamanını kaydet"""
         self._last_successful_data_time = datetime.now()
@@ -519,6 +588,7 @@ class BISTTradingBot:
         """
         Bot başlarken günlük analiz raporu gönderir.
         Piyasa durumundan bağımsız olarak çalışır.
+        Piyasa kapalıysa durum raporu da gönderir.
         """
         if self._startup_scan_done:
             return
@@ -529,6 +599,11 @@ class BISTTradingBot:
         
         # Provider sağlık durumlarını güncelle
         await self.provider_manager.update_all_health()
+        
+        # Piyasa kapalıysa durum raporu gönder
+        if not self.is_market_open():
+            logger.info("🔴 Piyasa kapalı - durum raporu gönderiliyor...")
+            await self.send_market_closed_status_report()
         
         # Tarama yap ve rapor gönder
         await self.scan_all_symbols(is_startup=True)
