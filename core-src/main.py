@@ -17,7 +17,7 @@ import asyncio
 import logging
 import signal
 import sys
-from datetime import datetime, time as datetime_time
+from datetime import datetime, time as datetime_time, timedelta
 from typing import List, Dict, Optional
 import traceback
 
@@ -82,6 +82,12 @@ class BISTTradingBot:
             'provider_failovers': 0
         }
         
+        # Veri erişimi takibi
+        self._last_successful_data_time: Optional[datetime] = None
+        self._data_outage_alert_sent: bool = False
+        self._last_market_open_report: Optional[datetime] = None
+        self._last_market_close_report: Optional[datetime] = None
+        
         logger.info("🤖 BİST Trading Bot başlatıldı")
     
     async def initialize(self):
@@ -143,6 +149,72 @@ class BISTTradingBot:
         
         return market_open <= current_time <= market_close
     
+    def is_market_opening(self) -> bool:
+        """
+        Piyasa açılış saati mi kontrol eder (10:00-10:05 arası)
+        
+        Returns:
+            bool: Açılış saati mi?
+        """
+        now = datetime.now()
+        if now.weekday() >= 5:
+            return False
+        
+        current_time = now.time()
+        market_open_start = datetime_time(config.MARKET_OPEN_HOUR, 0)
+        market_open_end = datetime_time(config.MARKET_OPEN_HOUR, 5)  # İlk 5 dakika
+        
+        return market_open_start <= current_time <= market_open_end
+    
+    def is_market_closing(self) -> bool:
+        """
+        Piyasa kapanış saati mi kontrol eder (17:55-18:05 arası)
+        
+        Returns:
+            bool: Kapanış saati mi?
+        """
+        now = datetime.now()
+        if now.weekday() >= 5:
+            return False
+        
+        current_time = now.time()
+        # Kapanıştan 5 dakika önce - 5 dakika sonra
+        close_start = datetime_time(config.MARKET_CLOSE_HOUR - 1, 55)
+        close_end = datetime_time(config.MARKET_CLOSE_HOUR, 5)
+        
+        return close_start <= current_time <= close_end
+    
+    def _record_successful_data_fetch(self):
+        """Başarılı veri çekme zamanını kaydet"""
+        self._last_successful_data_time = datetime.now()
+        self._data_outage_alert_sent = False  # Uyarı flag'ini sıfırla
+    
+    def _check_data_outage(self):
+        """
+        Veri kesintisi kontrolü.
+        2 günden fazla veri alınamazsa Telegram uyarısı gönder.
+        """
+        if self._last_successful_data_time is None:
+            return
+        
+        # Zaten uyarı gönderilmişse tekrar gönderme
+        if self._data_outage_alert_sent:
+            return
+        
+        time_since_last_data = datetime.now() - self._last_successful_data_time
+        outage_threshold = timedelta(days=getattr(config, 'DATA_OUTAGE_ALERT_DAYS', 2))
+        
+        if time_since_last_data > outage_threshold:
+            logger.critical(f"⚠️ KRİTİK: {time_since_last_data.days} gündür veri alınamıyor!")
+            
+            # Telegram uyarısı gönder
+            self.telegram_notifier.send_data_outage_alert(
+                last_data_time=self._last_successful_data_time,
+                outage_duration=time_since_last_data
+            )
+            
+            self._data_outage_alert_sent = True
+    
     def get_symbol_list(self) -> List[str]:
         """BİST sembol listesini döndürür"""
         symbols = [s for s in config.BIST_SYMBOLS if s not in config.BLACKLIST_SYMBOLS]
@@ -164,10 +236,24 @@ class BISTTradingBot:
             # ===== VERİ TOPLAMA (Provider Manager) =====
             
             # OHLCV verisi (günlük - indikatörler için)
-            ohlcv = await self.provider_manager.get_ohlcv_daily(symbol, limit=config.HISTORICAL_DAYS)
+            # Retry mekanizması ile veri çekme
+            max_retries = getattr(config, 'DATA_FETCH_MAX_RETRIES', 3)
+            retry_delay = getattr(config, 'DATA_FETCH_RETRY_DELAY', 5)
+            
+            ohlcv = None
+            for attempt in range(max_retries):
+                ohlcv = await self.provider_manager.get_ohlcv_daily(symbol, limit=config.HISTORICAL_DAYS)
+                
+                if ohlcv is not None and not ohlcv.empty:
+                    self._record_successful_data_fetch()  # Başarılı veri kaydı
+                    break
+                
+                if attempt < max_retries - 1:
+                    logger.debug(f"{symbol}: OHLCV verisi alınamadı, retry {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(retry_delay)
             
             if ohlcv is None or ohlcv.empty:
-                logger.warning(f"{symbol}: OHLCV verisi alınamadı")
+                logger.warning(f"{symbol}: OHLCV verisi alınamadı ({max_retries} deneme)")
                 return None
             
             # Günlük istatistikler (TradingView HTTP veya fallback)
@@ -246,6 +332,50 @@ class BISTTradingBot:
             self.stats['errors'] += 1
             return None
     
+    async def send_market_open_report(self):
+        """Piyasa açılışında veri akışı raporu gönder"""
+        today = datetime.now().date()
+        
+        # Bugün zaten rapor gönderilmiş mi?
+        if self._last_market_open_report and self._last_market_open_report.date() == today:
+            return
+        
+        logger.info("📊 Piyasa açılış raporu hazırlanıyor...")
+        
+        # Provider sağlık durumlarını güncelle
+        await self.provider_manager.update_all_health()
+        
+        # Raporu gönder
+        self.telegram_notifier.send_market_open_report(
+            provider_health=self.provider_manager.get_health_summary(),
+            last_data_time=self._last_successful_data_time,
+            stats=self.stats
+        )
+        
+        self._last_market_open_report = datetime.now()
+    
+    async def send_market_close_report(self):
+        """Piyasa kapanışında veri akışı raporu gönder"""
+        today = datetime.now().date()
+        
+        # Bugün zaten rapor gönderilmiş mi?
+        if self._last_market_close_report and self._last_market_close_report.date() == today:
+            return
+        
+        logger.info("📊 Piyasa kapanış raporu hazırlanıyor...")
+        
+        # Provider istatistiklerini al
+        provider_stats = self.provider_manager.get_stats()
+        
+        # Raporu gönder
+        self.telegram_notifier.send_market_close_report(
+            provider_stats=provider_stats,
+            bot_stats=self.stats,
+            last_data_time=self._last_successful_data_time
+        )
+        
+        self._last_market_close_report = datetime.now()
+    
     async def scan_all_symbols(self):
         """Tüm sembolleri tarar ve sinyal üretir"""
         try:
@@ -254,6 +384,17 @@ class BISTTradingBot:
             logger.info("=" * 60)
             
             self.stats['total_scans'] += 1
+            
+            # Veri kesintisi kontrolü
+            self._check_data_outage()
+            
+            # Piyasa açılış raporu (günde bir kez)
+            if self.is_market_opening():
+                await self.send_market_open_report()
+            
+            # Piyasa kapanış raporu (günde bir kez)
+            if self.is_market_closing():
+                await self.send_market_close_report()
             
             # Piyasa kontrolü
             if not self.is_market_open():

@@ -196,6 +196,14 @@ DATA_DELAY_ENABLED = True
 DATA_DELAY_MINUTES = 15
 DATA_DELAY_WARNING_TEXT = "⏱️ Veriler 15 dakika gecikmelidir (TradingView free tier)"
 
+# ================== VERİ KESİNTİSİ AYARLARI ==================
+# Veri alınamazsa kaç gün sonra Telegram uyarısı gönderilsin
+DATA_OUTAGE_ALERT_DAYS = 2
+
+# Veri çekme retry ayarları
+DATA_FETCH_MAX_RETRIES = 3  # Maksimum deneme sayısı
+DATA_FETCH_RETRY_DELAY = 5  # Denemeler arası bekleme (saniye)
+
 # ================== LOGLAMA AYARLARI ==================
 LOG_FILE = 'bist_bot.log'
 LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR

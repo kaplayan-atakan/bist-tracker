@@ -6,8 +6,8 @@ MVP Sprint: Veri gecikmesi uyarısı eklendi.
 """
 
 import requests
-from datetime import datetime
-from typing import Dict
+from datetime import datetime, timedelta
+from typing import Dict, Optional
 import logging
 
 import config
@@ -277,6 +277,185 @@ class TelegramNotifier:
             return self.send_message(message)
         except Exception as e:
             logger.error(f"Shutdown mesajı gönderme hatası: {str(e)}")
+            return False
+    
+    def send_data_outage_alert(
+        self,
+        last_data_time: Optional[datetime],
+        outage_duration: timedelta
+    ) -> bool:
+        """
+        Uzun süreli veri kesintisi uyarısı gönderir
+        
+        Args:
+            last_data_time: Son başarılı veri zamanı
+            outage_duration: Kesinti süresi
+            
+        Returns:
+            bool: Başarılı mı?
+        """
+        try:
+            days = outage_duration.days
+            hours = outage_duration.seconds // 3600
+            
+            message = "🚨 *KRİTİK: VERİ KESİNTİSİ UYARISI* 🚨\n\n"
+            message += f"⚠️ *{days} gün {hours} saattir veri alınamıyor!*\n\n"
+            
+            if last_data_time:
+                message += f"📍 *Son Başarılı Veri:* {last_data_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            else:
+                message += "📍 *Son Başarılı Veri:* Hiç alınamadı\n"
+            
+            message += f"📍 *Şu An:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            message += "*Olası Nedenler:*\n"
+            message += "• Provider API kesintisi\n"
+            message += "• Internet bağlantı sorunu\n"
+            message += "• Rate limit aşımı\n"
+            message += "• API anahtarı geçersiz\n\n"
+            message += "🔧 _Lütfen server ve provider durumunu kontrol edin._"
+            
+            return self.send_message(message)
+        except Exception as e:
+            logger.error(f"Veri kesintisi uyarısı gönderme hatası: {str(e)}")
+            return False
+    
+    def send_market_open_report(
+        self,
+        provider_health: Dict[str, str],
+        last_data_time: Optional[datetime],
+        stats: Dict
+    ) -> bool:
+        """
+        Piyasa açılışında veri akışı raporu gönderir
+        
+        Args:
+            provider_health: Provider sağlık durumları
+            last_data_time: Son başarılı veri zamanı
+            stats: Bot istatistikleri
+            
+        Returns:
+            bool: Başarılı mı?
+        """
+        try:
+            message = "🌅 *PİYASA AÇILIŞ RAPORU*\n\n"
+            message += f"⏰ *Tarih:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            
+            # Provider sağlık durumları
+            message += "📡 *Provider Durumları:*\n"
+            health_emojis = {
+                'healthy': '✅',
+                'degraded': '⚠️',
+                'down': '❌',
+                'unknown': '❓'
+            }
+            
+            for provider, status in provider_health.items():
+                emoji = health_emojis.get(status, '❓')
+                # Provider isimlerini formatla
+                provider_name = provider.replace('_', ' ').title()
+                message += f"  {emoji} {provider_name}: {status.upper()}\n"
+            
+            message += "\n"
+            
+            # Son veri zamanı
+            if last_data_time:
+                time_diff = datetime.now() - last_data_time
+                hours_ago = time_diff.total_seconds() / 3600
+                
+                if hours_ago < 1:
+                    time_str = f"{int(time_diff.total_seconds() / 60)} dakika önce"
+                elif hours_ago < 24:
+                    time_str = f"{int(hours_ago)} saat önce"
+                else:
+                    time_str = f"{time_diff.days} gün {int(hours_ago % 24)} saat önce"
+                
+                message += f"📊 *Son Veri:* {time_str}\n"
+            else:
+                message += "📊 *Son Veri:* Henüz veri çekilmedi\n"
+            
+            # Bot istatistikleri
+            message += f"🔍 *Toplam Tarama:* {stats.get('total_scans', 0)}\n"
+            message += f"📨 *Gönderilen Sinyal:* {stats.get('total_signals_sent', 0)}\n\n"
+            
+            # Veri gecikmesi uyarısı
+            if getattr(config, 'DATA_DELAY_ENABLED', False):
+                message += f"⏱️ _Veriler {config.DATA_DELAY_MINUTES} dk gecikmelidir_\n\n"
+            
+            message += "_Bot aktif ve taramaya hazır!_ ✅"
+            
+            return self.send_message(message)
+        except Exception as e:
+            logger.error(f"Piyasa açılış raporu gönderme hatası: {str(e)}")
+            return False
+    
+    def send_market_close_report(
+        self,
+        provider_stats: Dict,
+        bot_stats: Dict,
+        last_data_time: Optional[datetime]
+    ) -> bool:
+        """
+        Piyasa kapanışında veri akışı raporu gönderir
+        
+        Args:
+            provider_stats: Provider istatistikleri
+            bot_stats: Bot istatistikleri
+            last_data_time: Son başarılı veri zamanı
+            
+        Returns:
+            bool: Başarılı mı?
+        """
+        try:
+            message = "🌇 *PİYASA KAPANIŞ RAPORU*\n\n"
+            message += f"⏰ *Tarih:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            
+            # Günün özeti
+            message += "📊 *GÜNÜN ÖZETİ:*\n"
+            message += f"  🔍 Toplam Tarama: {bot_stats.get('total_scans', 0)}\n"
+            message += f"  📈 Analiz Edilen: {bot_stats.get('total_symbols_analyzed', 0)}\n"
+            message += f"  📩 Üretilen Sinyal: {bot_stats.get('total_signals_generated', 0)}\n"
+            message += f"  ✅ Gönderilen: {bot_stats.get('total_signals_sent', 0)}\n"
+            message += f"  ❌ Hatalar: {bot_stats.get('errors', 0)}\n\n"
+            
+            # Provider istatistikleri
+            message += "📡 *PROVIDER İSTATİSTİKLERİ:*\n"
+            message += f"  📞 Toplam İstek: {provider_stats.get('total_requests', 0)}\n"
+            message += f"  ✅ Başarılı: {provider_stats.get('successful_requests', 0)}\n"
+            message += f"  🔄 Failover: {provider_stats.get('failover_count', 0)}\n\n"
+            
+            # Provider sağlıkları
+            health = provider_stats.get('health', {})
+            if health:
+                message += "🟢 *Provider Durumları:*\n"
+                health_emojis = {
+                    'healthy': '✅',
+                    'degraded': '⚠️',
+                    'down': '❌',
+                    'unknown': '❓'
+                }
+                for provider, status in health.items():
+                    emoji = health_emojis.get(status, '❓')
+                    provider_name = provider.replace('_', ' ').title()
+                    message += f"  {emoji} {provider_name}: {status.upper()}\n"
+                message += "\n"
+            
+            # Son veri zamanı
+            if last_data_time:
+                message += f"📍 *Son Veri:* {last_data_time.strftime('%H:%M:%S')}\n\n"
+            
+            # Başarı oranı
+            total_req = provider_stats.get('total_requests', 0)
+            success_req = provider_stats.get('successful_requests', 0)
+            if total_req > 0:
+                success_rate = (success_req / total_req) * 100
+                rate_emoji = '🟢' if success_rate >= 90 else '🟡' if success_rate >= 70 else '🔴'
+                message += f"{rate_emoji} *Başarı Oranı:* {success_rate:.1f}%\n\n"
+            
+            message += "_Görüşmek üzere, yarın sabah açılışta!_ 👋"
+            
+            return self.send_message(message)
+        except Exception as e:
+            logger.error(f"Piyasa kapanış raporu gönderme hatası: {str(e)}")
             return False
     
     def get_stats(self) -> Dict:
