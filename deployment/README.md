@@ -233,7 +233,7 @@ crontab -e
 
 ## 📝 Versiyon Notları
 
-### v2.0 (MVP)
+### (MVP)
 - Provider katmanı entegrasyonu
 - TradingView HTTP + WebSocket desteği
 - 15 dakika veri gecikmesi uyarısı

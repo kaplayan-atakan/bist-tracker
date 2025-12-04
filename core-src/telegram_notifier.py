@@ -240,7 +240,7 @@ class TelegramNotifier:
             bool: Başarılı mı?
         """
         try:
-            message = "🚀 *BİST Trading Bot v2.0 (MVP) Başlatıldı!*\n\n"
+            message = "🚀 *BİST Trading Bot (MVP) Başlatıldı!*\n\n"
             message += f"⏰ *Zaman:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             
             # Tarama modu
@@ -552,6 +552,94 @@ class TelegramNotifier:
             return self.send_message(message)
         except Exception as e:
             logger.error(f"Durum raporu gönderme hatası: {str(e)}")
+            return False
+    
+    def send_scan_summary(
+        self,
+        total_scanned: int,
+        signals_generated: int,
+        top_results: list
+    ) -> bool:
+        """
+        Tarama özeti mesajı gönderir.
+        Her taramadan sonra en iyi 5 hisse ve skorlarını gösterir.
+        
+        Args:
+            total_scanned: Toplam taranan sembol sayısı
+            signals_generated: Üretilen sinyal sayısı
+            top_results: En yüksek skorlu sonuçlar listesi
+            
+        Returns:
+            bool: Başarılı mı?
+        """
+        try:
+            message = "📊 *TARAMA ÖZETİ*\n\n"
+            message += f"⏰ *Zaman:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            message += f"🔍 *Taranan:* {total_scanned} sembol\n"
+            message += f"📈 *Sinyal:* {signals_generated} hisse\n\n"
+            
+            if not top_results:
+                message += "_Skor alan hisse bulunamadı._"
+            else:
+                message += "🏆 *En Yüksek Skorlu 5 Hisse:*\n"
+                message += "```\n"
+                message += f"{'#':<3} {'Sembol':<8} {'Skor':>6} {'T':>3} {'M':>3} {'H':>3} {'P':>3}\n"
+                message += "-" * 35 + "\n"
+                
+                for i, result in enumerate(top_results, 1):
+                    symbol = result['symbol']
+                    signal = result['signal']
+                    
+                    total_score = signal.get('total_score', 0)
+                    max_score = signal.get('max_possible_score', 20)
+                    trend_score = signal.get('trend_score', 0)
+                    momentum_score = signal.get('momentum_score', 0)
+                    volume_score = signal.get('volume_score', 0)
+                    fundamental_pa_score = signal.get('fundamental_pa_score', 0)
+                    signal_level = signal.get('signal_level', '')
+                    
+                    # Sinyal seviyesi işareti
+                    level_mark = '🔥' if signal_level == 'ULTRA_BUY' else '📈' if signal_level == 'STRONG_BUY' else '👀' if signal_level == 'WATCHLIST' else ''
+                    
+                    message += f"{i:<3} {symbol:<8} {total_score:>2}/{max_score:<2}  {trend_score:>2}  {momentum_score:>2}  {volume_score:>2}  {fundamental_pa_score:>2}\n"
+                
+                message += "```\n"
+                message += "_T=Trend, M=Momentum, H=Hacim, P=Temel/PA_\n\n"
+                
+                # En yüksek skorlu hissenin detayları
+                top_result = top_results[0]
+                top_signal = top_result['signal']
+                top_symbol = top_result['symbol']
+                top_daily = top_result.get('daily_stats', {})
+                
+                top_level = top_signal.get('signal_level', 'NO_SIGNAL')
+                level_emoji = '🔥' if top_level == 'ULTRA_BUY' else '📈' if top_level == 'STRONG_BUY' else '👀' if top_level == 'WATCHLIST' else '⚪'
+                
+                message += f"{level_emoji} *En Yüksek: {top_symbol}*\n"
+                
+                current_price = top_daily.get('current_price', 0)
+                daily_change = top_daily.get('daily_change_percent', 0)
+                change_emoji = '🟢' if daily_change >= 0 else '🔴'
+                
+                message += f"💰 Fiyat: {current_price:.2f} TL | {change_emoji} {daily_change:+.2f}%\n\n"
+                
+                # Tetiklenen kriterler (ilk 3)
+                triggered = top_signal.get('triggered_criteria', [])
+                if triggered:
+                    message += "*Öne Çıkan Kriterler:*\n"
+                    for j, criterion in enumerate(triggered[:3], 1):
+                        message += f"{j}. {criterion}\n"
+                    if len(triggered) > 3:
+                        message += f"_... ve {len(triggered) - 3} kriter daha_\n"
+            
+            # Veri gecikmesi uyarısı
+            if getattr(config, 'DATA_DELAY_ENABLED', False):
+                message += f"\n⏱️ _Veriler {config.DATA_DELAY_MINUTES} dk gecikmelidir_"
+            
+            return self.send_message(message)
+            
+        except Exception as e:
+            logger.error(f"Tarama özeti gönderme hatası: {str(e)}")
             return False
     
     def get_stats(self) -> Dict:

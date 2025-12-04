@@ -4,9 +4,29 @@ Tüm bot parametreleri burada merkezi olarak yönetilir
 """
 
 # ================== GENEL AYARLAR ==================
-# Tarama modu: "continuous" (sürekli), "open_close" (açılış+kapanış)
-SCAN_MODE = "open_close"  # Günlük veri için açılış+kapanış yeterli
+# Tarama modu:
+#   - "open_close": Açılış+kapanış (günde 2 tarama)
+#   - "continuous": Sürekli tarama (eski davranış)
+#   - "hybrid": Günlük trend yenileme + intraday tarama (ÖNERİLEN)
+SCAN_MODE = "hybrid"  # Dual-frequency: günlük + 15dk intraday
 
+# ===== HYBRID MOD AYARLARI =====
+# İntraday tarama aralığı (saniye)
+# 15 dakika = 900 saniye (TradingView 15dk gecikmeli olduğu için ideal)
+INTRADAY_SCAN_INTERVAL = 900  # 15 dakika
+
+# Günlük veri yenileme saatleri (açılış öncesi + kapanış sonrası)
+DAILY_DATA_REFRESH_TIMES = ["09:55", "18:05"]
+
+# Tarama penceresi
+SCAN_START_TIME = "10:00"
+SCAN_END_TIME = "18:00"
+
+# İlk taramayı açılıştan kaç dakika sonra yap?
+# 15dk gecikme olduğu için, 10:15'te ilk gerçek veri gelir
+FIRST_SCAN_DELAY_MINUTES = 15
+
+# ===== ESKİ MOD AYARLARI (geriye dönük uyumluluk) =====
 # Tarama aralığı (saniye) - sadece continuous modda kullanılır
 SCAN_INTERVAL_SECONDS = 300  # 5 dakika
 
@@ -26,7 +46,10 @@ MIN_PRICE = 5.0  # TL
 MAX_PRICE = 500.0  # TL
 
 # Spread filtresi (yüzde)
-MAX_SPREAD_PERCENT = 0.5
+# BİST spreads tipik olarak %1-3 aralığında
+# Kapanışa yakın (17:30+) spread'ler doğal olarak genişler
+MAX_SPREAD_PERCENT = 3.0  # Normal market saatleri için
+MAX_SPREAD_PERCENT_CLOSE = 5.0  # Kapanışa yakın (17:30-18:00)
 
 # ================== SKORLAMA BARAJLARI ==================
 ULTRA_BUY_THRESHOLD = 16  # 20 üzerinden 16+
@@ -46,8 +69,8 @@ SIGNAL_COOLDOWN_MINUTES = 60
 # ================== TELEGRAM AYARLARI ==================
 # Bu bilgileri kendi Telegram bot token'ınız ile değiştirin
 import os
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8198117366:AAHzc6j-fbwpzqowRArUdO__g6aYOkfeZqk")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "8070220440")
+TELEGRAM_BOT_TOKEN = "7611453017:AAFAz9jBsUQ-N6RUdQ8pnct0gIzV2UeEmIM"
+TELEGRAM_CHAT_ID = "5883922751"
 
 # Dry-run modu (True ise Telegram'a göndermez, sadece log'lar)
 DRY_RUN_MODE = os.getenv("DRY_RUN_MODE", "false").lower() == "true"
@@ -91,7 +114,9 @@ CACHE_DURATION_SECONDS = 60
 #
 # Öncelik Sıralaması:
 # ------------------
-DATA_PRIORITY_INTRADAY = ["tradingview_http", "yahoo"]  # Intraday için
+# TradingView HTTP primary intraday için - REST API ile OHLCV çekimi
+# NOT: tradingview_ws sadece realtime quote stream içindir, OHLCV alamaz
+DATA_PRIORITY_INTRADAY = ["tradingview_http", "yahoo"]  # Intraday için (WS kaldırıldı)
 DATA_PRIORITY_DAILY = ["yahoo"]  # Günlük veri için (Yahoo daha güvenilir)
 DATA_PRIORITY_FUNDAMENTALS = ["tradingview_http", "yahoo"]  # Temel analiz için
 
@@ -213,6 +238,9 @@ DATA_FETCH_RETRY_DELAY = 5  # Denemeler arası bekleme (saniye)
 # ================== LOGLAMA AYARLARI ==================
 LOG_FILE = 'bist_bot.log'
 LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL_THIRD_PARTY = 'WARNING'  # yfinance, aiohttp, websockets vb. için
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # ================== SEMBOL DOĞRULAMA AYARLARI ==================
 # Sembol listesi doğrulaması
@@ -226,39 +254,67 @@ BLACKLIST_SYMBOLS = [
 ]
 
 # ================== BİST SEMBOL LİSTESİ ==================
-# Doğrulanmış ve yfinance ile çalışan BİST sembolleri
-# Son güncelleme: Aralık 2024
-# Güncelleme için: python -m utils.symbol_fetcher --update-config
+# 442 doğrulanmış BİST sembolü (yfinance ile test edildi)
+# Son güncelleme: Aralık 2025
+# Kaynak: TradingView Scanner API + yfinance doğrulaması
+# Güncelleme için: python test.py (proje root'unda)
 BIST_SYMBOLS = [
-    # Bankacılık
-    'AKBNK', 'GARAN', 'HALKB', 'ISCTR', 'SKBNK', 'TSKB', 'VAKBN', 'YKBNK',
-    # Holding
-    'AGHOL', 'DOHOL', 'GLYHO', 'KCHOL', 'SAHOL',
-    # Havacılık & Savunma
-    'ASELS', 'PGSUS', 'TAVHL', 'THYAO',
-    # Otomotiv
-    'BRISA', 'DOAS', 'FROTO', 'OTKAR', 'TOASO', 'TTRAK',
-    # Enerji
-    'AHGAZ', 'AKSEN', 'AYGAZ', 'ENJSA', 'EUPWR', 'GWIND', 'TUPRS', 'ZOREN',
-    # Teknoloji & Telekomünikasyon
-    'INDES', 'LOGO', 'NETAS', 'TCELL', 'TTKOM',
-    # Perakende
-    'BIMAS', 'MAVI', 'MGROS', 'MPARK', 'SOKM',
-    # Sanayi & Üretim
-    'ARCLK', 'BRSAN', 'EREGL', 'KRDMD', 'SISE', 'VESBE', 'VESTL',
-    # Kimya & Petrokimya
-    'AKSA', 'GUBRF', 'KORDS', 'PETKM', 'SASA',
-    # Gıda & İçecek
-    'AEFES', 'CCOLA', 'TATGD', 'TBORG', 'ULKER',
-    # İnşaat & GYO
-    'EKGYO', 'ENKAI', 'ISGYO', 'PEKGY', 'SNGYO', 'TDGYO',
-    # Madencilik
-    'IPEKE',
-    # Çimento & Yapı Malzemeleri
-    'AKCNS', 'CIMSA', 'GOLTS', 'OYAKC', 'TRKCM',
-    # Diğer Sanayi
-    'ALARK', 'CLEBI', 'GESAN', 'HEKTS', 'ISMEN', 'KARSN', 'KLMSN',
-    'KONTR', 'ODAS', 'TKFEN', 'TURSG',
+    'A1YEN', 'ADEL', 'ADGYO', 'AEFES', 'AFYON', 'AGESA', 'AGHOL', 'AGROT',
+    'AGYO', 'AHGAZ', 'AHSGY', 'AKBNK', 'AKENR', 'AKFGY', 'AKFIS', 'AKGRT',
+    'AKMGY', 'AKSA', 'AKSEN', 'AKSGY', 'AKYHO', 'ALARK', 'ALBRK', 'ALFAS',
+    'ALGYO', 'ALKA', 'ALKIM', 'ALTNY', 'ALVES', 'ANGEN', 'ANHYT', 'ANSGR',
+    'ARDYZ', 'ARENA', 'ARMGD', 'ARSAN', 'ARTMS', 'ARZUM', 'ASELS', 'ASGYO',
+    'ASTOR', 'ASUZU', 'ATAGY', 'ATEKS', 'ATLAS', 'ATSYH', 'AVGYO', 'AVHOL',
+    'AVOD', 'AVTUR', 'AYDEM', 'AYEN', 'AYES', 'AYGAZ', 'AZTEK', 'BAGFS',
+    'BAHKM', 'BAKAB', 'BALAT', 'BALSU', 'BANVT', 'BARMA', 'BASGZ', 'BAYRK',
+    'BEGYO', 'BERA', 'BESLR', 'BEYAZ', 'BFREN', 'BIENY', 'BIGEN', 'BIGTK',
+    'BIMAS', 'BINBN', 'BINHO', 'BIOEN', 'BIZIM', 'BJKAS', 'BMSTL', 'BNTAS',
+    'BOBET', 'BORLS', 'BORSK', 'BOSSA', 'BRISA', 'BRKO', 'BRKSN', 'BRKVY',
+    'BRLSM', 'BRMEN', 'BRSAN', 'BRYAT', 'BULGS', 'BURVA', 'BVSAN', 'BYDNR',
+    'DAGI', 'DARDL', 'DERHL', 'DERIM', 'DESA', 'DEVA', 'DGGYO', 'DGNMO',
+    'DIRIT', 'DITAS', 'DMRGD', 'DMSAS', 'DNISI', 'DOAS', 'DOFER', 'DOFRB',
+    'DOGUB', 'DOHOL', 'DOKTA', 'DSTKF', 'DUNYH', 'DURDO', 'DURKN', 'DYOBY',
+    'DZGYO', 'EBEBK', 'EDATA', 'EFOR', 'EGEEN', 'EGEGY', 'EGGUB', 'EGSER',
+    'EKGYO', 'EKIZ', 'EKOS', 'EKSUN', 'EMKEL', 'EMNIS', 'ENERY', 'ENJSA',
+    'ENKAI', 'ENSRI', 'ENTRA', 'ERBOS', 'EREGL', 'ERSU', 'ESEN', 'ETILR',
+    'ETYAT', 'EUHOL', 'EUKYO', 'EUREN', 'EUYO', 'EYGYO', 'FENER', 'FONET',
+    'FORMT', 'FRIGO', 'FROTO', 'FZLGY', 'GARAN', 'GARFA', 'GEDIK', 'GEDZA',
+    'GENIL', 'GENTS', 'GEREL', 'GESAN', 'GLBMD', 'GLDTR', 'GLRMK', 'GLRYH',
+    'GLYHO', 'GMSTR', 'GMTAS', 'GOKNR', 'GOLTS', 'GOODY', 'GRNYO', 'GRSEL',
+    'GRTHO', 'GSDHO', 'GSRAY', 'GUBRF', 'GUNDG', 'GZNMI', 'HALKB', 'HATEK',
+    'HATSN', 'HDFGS', 'HEDEF', 'HEKTS', 'HKTM', 'HLGYO', 'HOROZ', 'HRKET',
+    'HTTBT', 'HUNER', 'HURGZ', 'IDGYO', 'IEYHO', 'IHAAS', 'IHEVA', 'IHGZT',
+    'IHLAS', 'IHLGM', 'IHYAY', 'IMASM', 'INDES', 'INFO', 'INGRM', 'INTEK',
+    'INTEM', 'INVEO', 'INVES', 'ISBIR', 'ISBTR', 'ISDMR', 'ISFIN', 'ISGLK',
+    'ISGSY', 'ISGYO', 'ISMEN', 'ISSEN', 'ISYAT', 'IZENR', 'IZFAS', 'IZINV',
+    'JANTS', 'KAREL', 'KARSN', 'KARTN', 'KATMR', 'KBORU', 'KENT', 'KERVN',
+    'KFEIN', 'KGYO', 'KIMMR', 'KLGYO', 'KLKIM', 'KLMSN', 'KLNMA', 'KLRHO',
+    'KLSER', 'KLSYN', 'KNFRT', 'KONKA', 'KONTR', 'KONYA', 'KORDS', 'KOTON',
+    'KRDMA', 'KRDMB', 'KRDMD', 'KRGYO', 'KRONT', 'KRSTL', 'KRTEK', 'KRVGD',
+    'KSTUR', 'KTLEV', 'KTSKR', 'KUVVA', 'KUYAS', 'KZBGY', 'KZGYO', 'LIDER',
+    'LIDFA', 'LILAK', 'LINK', 'LKMNH', 'LOGO', 'LRSHO', 'LUKSK', 'LYDHO',
+    'MAALT', 'MAGEN', 'MAKIM', 'MAKTK', 'MANAS', 'MARBL', 'MARKA', 'MARMR',
+    'MARTI', 'MAVI', 'MEDTR', 'MEGMT', 'MEKAG', 'MERIT', 'MERKO', 'METRO',
+    'MGROS', 'MHRGY', 'MIATK', 'MNDRS', 'MNDTR', 'MOBTL', 'MOGAN', 'MRGYO',
+    'MRSHL', 'MSGYO', 'MTRKS', 'MTRYO', 'MZHLD', 'NATEN', 'NETAS', 'NIBAS',
+    'NTGAZ', 'NTHOL', 'NUGYO', 'OBAMS', 'ODAS', 'OFSYM', 'ONRYT', 'ORMA',
+    'OSMEN', 'OSTIM', 'OTKAR', 'OTTO', 'OYAYO', 'OYLUM', 'OYYAT', 'OZATD',
+    'OZGYO', 'OZKGY', 'OZRDN', 'OZSUB', 'OZYSR', 'QNBFK', 'QNBTR', 'QTEMZ',
+    'QUAGR', 'RALYH', 'RAYSG', 'REEDR', 'RGYAS', 'RODRG', 'RTALB', 'RUBNS',
+    'RYGYO', 'RYSAS', 'SAFKR', 'SAHOL', 'SAMAT', 'SANEL', 'SANFM', 'SANKO',
+    'SARKY', 'SASA', 'SAYAS', 'SDTTR', 'SEGMN', 'SEGYO', 'SEKFK', 'SEKUR',
+    'SELVA', 'SERNT', 'SEYKM', 'SILVR', 'SKBNK', 'SKTAS', 'SKYMD', 'SMART',
+    'SMRTG', 'SMRVA', 'SNGYO', 'SNKRN', 'SODSN', 'SOKM', 'SRVGY', 'SUMAS',
+    'SUNTK', 'SURGY', 'TABGD', 'TARKM', 'TATEN', 'TATGD', 'TAVHL', 'TBORG',
+    'TDGYO', 'TEHOL', 'TEKTU', 'TERA', 'TEZOL', 'TGSAS', 'THYAO', 'TKFEN',
+    'TKNSA', 'TLMAN', 'TMSN', 'TOASO', 'TRALT', 'TRENJ', 'TRGYO', 'TRHOL',
+    'TRMET', 'TSGYO', 'TSKB', 'TTKOM', 'TTRAK', 'TUKAS', 'TUREX', 'TURGG',
+    'TURSG', 'UFUK', 'ULAS', 'ULKER', 'ULUFA', 'ULUUN', 'UNLU', 'USAK',
+    'USDTR', 'VAKBN', 'VAKFA', 'VAKFN', 'VAKKO', 'VANGD', 'VBTYZ', 'VERTU',
+    'VERUS', 'VESTL', 'VKFYO', 'VKGYO', 'VKING', 'VRGYO', 'VSNMD', 'YATAS',
+    'YAYLA', 'YBTAS', 'YEOTK', 'YESIL', 'YGGYO', 'YGYO', 'YIGIT', 'YKBNK',
+    'YKSLN', 'YONGA', 'YUNSA', 'YYLGD', 'ZEDUR', 'ZGOLD', 'ZOREN', 'ZRE20',
+    'ZRGYO', 'ZSR25',
 ]
 
 # ================== VERI ÇERÇEVESİ AYARLARI ==================

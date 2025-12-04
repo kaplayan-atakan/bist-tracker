@@ -6,23 +6,29 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/bist-tracker/core-src
-ExecStart=/home/ubuntu/bist-tracker/venv/bin/python main.py
-Restart=on-failure
+User=botuser
+Group=botuser
+WorkingDirectory=/home/botuser/bist-tracker/core-src
+ExecStart=/home/botuser/bist-tracker/.venv/bin/python main.py
+Restart=always
 RestartSec=30
 
 # Logging
-StandardOutput=append:/var/log/bist-trading-bot/bot.log
-StandardError=append:/var/log/bist-trading-bot/error.log
+StandardOutput=append:/home/botuser/bist-tracker/logs/bot.log
+StandardError=append:/home/botuser/bist-tracker/logs/error.log
 
-# Environment
+# Environment - TÜRKIYE TIMEZONE ZORUNLU
+Environment="TZ=Europe/Istanbul"
 Environment="PYTHONUNBUFFERED=1"
 Environment="PYTHONDONTWRITEBYTECODE=1"
 
+# Telegram credentials - Bunları kendi değerlerinizle değiştirin
+# Environment="TELEGRAM_BOT_TOKEN=your_token_here"
+# Environment="TELEGRAM_CHAT_ID=your_chat_id_here"
+# Environment="DRY_RUN_MODE=false"
+
 # Load environment variables from file (optional)
-# EnvironmentFile=/home/ubuntu/bist-tracker/.env
+# EnvironmentFile=/home/botuser/bist-tracker/.env
 
 # Security settings
 NoNewPrivileges=yes
@@ -33,6 +39,10 @@ ProtectHome=read-only
 # Resource limits
 MemoryMax=512M
 CPUQuota=50%
+
+# Restart limiti (5 dakikada 3'ten fazla crash varsa durur)
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target

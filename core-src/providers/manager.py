@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Any, AsyncIterator
 
 import pandas as pd
 
+import config  # Config import'u burada
 from .base import BaseDataProvider, Timeframe, ProviderHealthStatus, ProviderConfig
 from .tradingview_ws import TradingViewWebSocketProvider, get_tradingview_ws_provider
 from .tradingview_http import TradingViewHTTPProvider, get_tradingview_http_provider
@@ -27,17 +28,12 @@ from .yahoo import YahooProvider, get_yahoo_provider
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# PROVIDER ÖNCELİK SIRALAMALARI
+# PROVIDER ÖNCELİK SIRALAMALARI (config.py'den alınıyor)
 # ============================================================================
 
-# İntraday (1m, 5m, 15m, 1h) için öncelik sırası
-# TradingView HTTP: Anlık snapshot, düşük latency (~200ms)
-# Yahoo: Fallback - yfinance ile intraday çekilebilir
-DATA_PRIORITY_INTRADAY = ["tradingview_http", "yahoo"]
-
-# Günlük (1D, 1W) için öncelik sırası
-# Yahoo: Ana kaynak - yfinance ile güvenilir günlük veri
-DATA_PRIORITY_DAILY = ["yahoo"]
+# Config'den öncelik listelerini al
+DATA_PRIORITY_INTRADAY = config.DATA_PRIORITY_INTRADAY
+DATA_PRIORITY_DAILY = config.DATA_PRIORITY_DAILY
 
 # Fundamentals için öncelik sırası
 # TradingView HTTP: Sector, market cap, PE, PB (screener'dan)
