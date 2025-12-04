@@ -1,133 +1,293 @@
-#!/bin/bash
-#
-# BİST Trading Bot - VPS Kurulum Scripti
-# Ubuntu 20.04+ için test edilmiştir.
+#!/usr/bin/env bash
+# =============================================================================
+# BİST Trading Bot - VPS Installation Script
+# =============================================================================
+# 
+# Production-ready kurulum scripti. Tüm deployment tecrübeleri dahil edilmiştir:
+# - İzin sorunları çözüldü (botuser:botuser ownership)
+# - Tüm log dizinleri oluşturuluyor
+# - Basitleştirilmiş systemd service dosyası
+# - Mutlak Python path kullanımı
 #
 # Kullanım:
-#   chmod +x install_service.sh
-#   sudo ./install_service.sh
+#   1. Repo'yu /home/botuser/bist-tracker dizinine klonla
+#   2. sudo bash deployment/install_service.sh
 #
+# =============================================================================
 
-set -e  # Hata durumunda dur
+set -euo pipefail
 
-# Renkli çıktı
+# =============================================================================
+# Configuration
+# =============================================================================
+
+BOT_USER="botuser"
+BOT_GROUP="botuser"
+INSTALL_DIR="/home/${BOT_USER}/bist-tracker"
+WORKING_DIR="${INSTALL_DIR}/core-src"
+VENV_DIR="${INSTALL_DIR}/.venv"
+PYTHON_BIN="${VENV_DIR}/bin/python"
+PIP_BIN="${VENV_DIR}/bin/pip"
+SERVICE_NAME="bist-trading-bot"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
+
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}=============================================${NC}"
-echo -e "${GREEN}  BİST Trading Bot - VPS Kurulum Scripti    ${NC}"
-echo -e "${GREEN}=============================================${NC}"
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
-# Root kontrolü
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}Lütfen root olarak çalıştırın: sudo ./install_service.sh${NC}"
-    exit 1
-fi
+info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+step()  { echo -e "${BLUE}[STEP]${NC} $1"; }
 
-# Değişkenler
-BOT_USER="botuser"
-BOT_HOME="/home/${BOT_USER}"
-BOT_DIR="${BOT_HOME}/bist-tracker"
-VENV_DIR="${BOT_DIR}/.venv"
-LOGS_DIR="${BOT_DIR}/logs"
-SERVICE_NAME="bist-trading-bot"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+print_banner() {
+    echo ""
+    echo -e "${GREEN}=============================================${NC}"
+    echo -e "${GREEN}  BİST Trading Bot - Installation Script     ${NC}"
+    echo -e "${GREEN}=============================================${NC}"
+    echo ""
+}
 
-echo ""
-echo -e "${YELLOW}[1/8] Sistem güncelleniyor...${NC}"
-apt update -q
+# =============================================================================
+# Pre-flight Checks
+# =============================================================================
 
-echo ""
-echo -e "${YELLOW}[2/8] Gerekli paketler yükleniyor...${NC}"
-apt install -y python3 python3-pip python3-venv git curl
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        error "Bu script root olarak çalıştırılmalıdır: sudo bash $0"
+    fi
+}
 
-echo ""
-echo -e "${YELLOW}[3/8] Bot kullanıcısı kontrol ediliyor...${NC}"
-if id "${BOT_USER}" &>/dev/null; then
-    echo "  Kullanıcı '${BOT_USER}' zaten mevcut"
-else
-    echo "  Kullanıcı '${BOT_USER}' oluşturuluyor..."
-    useradd -m -s /bin/bash ${BOT_USER}
-    echo "  Kullanıcı oluşturuldu"
-fi
+check_user_exists() {
+    if ! id "${BOT_USER}" &>/dev/null; then
+        info "Kullanıcı '${BOT_USER}' oluşturuluyor..."
+        useradd -m -s /bin/bash "${BOT_USER}"
+        info "Kullanıcı oluşturuldu"
+    else
+        info "Kullanıcı '${BOT_USER}' zaten mevcut"
+    fi
+}
 
-echo ""
-echo -e "${YELLOW}[4/8] Dizin yapısı oluşturuluyor...${NC}"
-mkdir -p ${BOT_DIR}
-mkdir -p ${LOGS_DIR}
+check_install_dir() {
+    if [[ ! -d "${INSTALL_DIR}" ]]; then
+        error "Kurulum dizini bulunamadı: ${INSTALL_DIR}\nÖnce repo'yu klonlayın: git clone <repo> ${INSTALL_DIR}"
+    fi
+    if [[ ! -f "${WORKING_DIR}/main.py" ]]; then
+        error "main.py bulunamadı: ${WORKING_DIR}/main.py"
+    fi
+    info "Kurulum dizini doğrulandı: ${INSTALL_DIR}"
+}
 
-# Bot dosyalarını kopyala (eğer script bot dizininden çalıştırılıyorsa)
-if [ -d "${SCRIPT_DIR}/../core-src" ]; then
-    echo "  Bot dosyaları kopyalanıyor..."
-    cp -r ${SCRIPT_DIR}/../core-src ${BOT_DIR}/
-    chown -R ${BOT_USER}:${BOT_USER} ${BOT_DIR}
-    echo "  Dosyalar kopyalandı"
-else
-    echo -e "${YELLOW}  Not: Bot dosyaları manuel olarak ${BOT_DIR}/core-src dizinine kopyalanmalı${NC}"
-fi
+# =============================================================================
+# Installation Steps
+# =============================================================================
 
-echo ""
-echo -e "${YELLOW}[5/8] Python virtual environment oluşturuluyor...${NC}"
-if [ -d "${VENV_DIR}" ]; then
-    echo "  Virtual environment zaten mevcut, atlanıyor..."
-else
-    sudo -u ${BOT_USER} python3 -m venv ${VENV_DIR}
-    echo "  Virtual environment oluşturuldu"
-fi
+install_system_deps() {
+    step "[1/7] Sistem bağımlılıkları yükleniyor..."
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-pip python3-venv git curl > /dev/null 2>&1
+    info "Sistem bağımlılıkları yüklendi"
+}
 
-echo ""
-echo -e "${YELLOW}[6/8] Python paketleri yükleniyor...${NC}"
-if [ -f "${BOT_DIR}/core-src/requirements.txt" ]; then
-    sudo -u ${BOT_USER} ${VENV_DIR}/bin/pip install --upgrade pip
-    sudo -u ${BOT_USER} ${VENV_DIR}/bin/pip install -r ${BOT_DIR}/core-src/requirements.txt
-    echo "  Paketler yüklendi"
-else
-    echo -e "${YELLOW}  Uyarı: requirements.txt bulunamadı${NC}"
-fi
+create_directories() {
+    step "[2/7] Dizinler oluşturuluyor..."
+    
+    # Ana log dizini (systemd çıktısı için)
+    mkdir -p "${INSTALL_DIR}/logs"
+    
+    # Core-src log dizini (scan_errors.log, bist_bot.log için)
+    mkdir -p "${WORKING_DIR}/logs"
+    
+    info "Dizinler oluşturuldu:"
+    info "  - ${INSTALL_DIR}/logs"
+    info "  - ${WORKING_DIR}/logs"
+}
 
-echo ""
-echo -e "${YELLOW}[7/8] Systemd servisi yükleniyor...${NC}"
-cp ${SCRIPT_DIR}/bist-trading-bot.service ${SERVICE_FILE}
+setup_venv() {
+    step "[3/7] Python virtual environment kuruluyor..."
+    
+    if [[ ! -d "${VENV_DIR}" ]]; then
+        sudo -u "${BOT_USER}" python3 -m venv "${VENV_DIR}"
+        info "Virtual environment oluşturuldu: ${VENV_DIR}"
+    else
+        info "Virtual environment zaten mevcut"
+    fi
+    
+    info "Python bağımlılıkları yükleniyor..."
+    sudo -u "${BOT_USER}" "${PIP_BIN}" install --upgrade pip -q
+    
+    if [[ -f "${WORKING_DIR}/requirements.txt" ]]; then
+        sudo -u "${BOT_USER}" "${PIP_BIN}" install -r "${WORKING_DIR}/requirements.txt" -q
+        info "Bağımlılıklar yüklendi"
+    else
+        warn "requirements.txt bulunamadı: ${WORKING_DIR}/requirements.txt"
+    fi
+}
 
-# Servisi yeniden yükle
-systemctl daemon-reload
-systemctl enable ${SERVICE_NAME}
-echo "  Servis yüklendi ve etkinleştirildi"
+fix_permissions() {
+    step "[4/7] Dosya izinleri ayarlanıyor..."
+    
+    # Tüm dosyaları botuser'a ata
+    chown -R "${BOT_USER}:${BOT_GROUP}" "${INSTALL_DIR}"
+    
+    # Çalıştırılabilir scriptler
+    chmod +x "${INSTALL_DIR}/deployment/"*.sh 2>/dev/null || true
+    
+    # Dizin izinleri
+    chmod 755 "${INSTALL_DIR}"
+    chmod 755 "${INSTALL_DIR}/logs"
+    chmod 755 "${WORKING_DIR}/logs"
+    
+    info "İzinler ayarlandı (owner: ${BOT_USER}:${BOT_GROUP})"
+}
 
-echo ""
-echo -e "${YELLOW}[8/8] Dizin izinleri ayarlanıyor...${NC}"
-chown -R ${BOT_USER}:${BOT_USER} ${BOT_DIR}
-chmod 750 ${BOT_DIR}
-chmod 750 ${LOGS_DIR}
-echo "  İzinler ayarlandı"
+create_service() {
+    step "[5/7] Systemd servisi oluşturuluyor..."
+    
+    # Basit, test edilmiş service dosyası
+    cat << EOF > "${SERVICE_FILE}"
+[Unit]
+Description=BIST Trading Bot - Automated Stock Scanner
+After=network.target
 
-echo ""
-echo -e "${GREEN}=============================================${NC}"
-echo -e "${GREEN}  Kurulum Tamamlandı!                        ${NC}"
-echo -e "${GREEN}=============================================${NC}"
-echo ""
-echo "  Sonraki Adımlar:"
-echo "  ----------------"
-echo ""
-echo "  1. Telegram ayarlarını yapılandırın:"
-echo "     sudo nano /etc/systemd/system/${SERVICE_NAME}.service"
-echo "     # TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID satırlarını düzenleyin"
-echo ""
-echo "  2. Servisi başlatın:"
-echo "     sudo systemctl start ${SERVICE_NAME}"
-echo ""
-echo "  3. Durumu kontrol edin:"
-echo "     sudo systemctl status ${SERVICE_NAME}"
-echo ""
-echo "  4. Logları izleyin:"
-echo "     sudo journalctl -u ${SERVICE_NAME} -f"
-echo "     veya"
-echo "     tail -f ${LOGS_DIR}/bot.log"
-echo ""
-echo "  5. Servisi durdurmak için:"
-echo "     sudo systemctl stop ${SERVICE_NAME}"
-echo ""
-echo -e "${GREEN}Türkiye saati: $(TZ=Europe/Istanbul date '+%Y-%m-%d %H:%M:%S')${NC}"
+[Service]
+Type=simple
+User=${BOT_USER}
+Group=${BOT_GROUP}
+WorkingDirectory=${WORKING_DIR}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Europe/Istanbul
+ExecStart=${PYTHON_BIN} main.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:${INSTALL_DIR}/logs/bot.log
+StandardError=append:${INSTALL_DIR}/logs/error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    info "Service dosyası oluşturuldu: ${SERVICE_FILE}"
+}
+
+setup_logrotate() {
+    step "[6/7] Log rotation ayarlanıyor..."
+    
+    cat << EOF > "${LOGROTATE_FILE}"
+${INSTALL_DIR}/logs/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 ${BOT_USER} ${BOT_GROUP}
+}
+
+${WORKING_DIR}/logs/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 ${BOT_USER} ${BOT_GROUP}
+}
+EOF
+
+    info "Log rotation yapılandırıldı: ${LOGROTATE_FILE}"
+}
+
+enable_service() {
+    step "[7/7] Servis etkinleştiriliyor..."
+    
+    systemctl daemon-reload
+    systemctl enable "${SERVICE_NAME}"
+    
+    # Eğer servis zaten çalışıyorsa restart, değilse start
+    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+        systemctl restart "${SERVICE_NAME}"
+        info "Servis yeniden başlatıldı"
+    else
+        systemctl start "${SERVICE_NAME}"
+        info "Servis başlatıldı"
+    fi
+    
+    # Durumu kontrol et
+    sleep 3
+    
+    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+        info "✅ Servis başarıyla çalışıyor!"
+    else
+        warn "⚠️ Servis başlatılamadı. Kontrol edin:"
+        warn "   sudo journalctl -u ${SERVICE_NAME} -n 50"
+        warn "   sudo ${PYTHON_BIN} ${WORKING_DIR}/main.py"
+    fi
+}
+
+# =============================================================================
+# Summary
+# =============================================================================
+
+print_summary() {
+    echo ""
+    echo -e "${GREEN}=============================================${NC}"
+    echo -e "${GREEN}  Kurulum Tamamlandı!                        ${NC}"
+    echo -e "${GREEN}=============================================${NC}"
+    echo ""
+    echo "  Servis: ${SERVICE_NAME}"
+    echo "  Kullanıcı: ${BOT_USER}"
+    echo "  Dizin: ${INSTALL_DIR}"
+    echo "  Loglar:"
+    echo "    - ${INSTALL_DIR}/logs/bot.log"
+    echo "    - ${INSTALL_DIR}/logs/error.log"
+    echo "    - ${WORKING_DIR}/logs/bist_bot.log"
+    echo ""
+    echo "  Yönetim Komutları:"
+    echo "    sudo systemctl status ${SERVICE_NAME}"
+    echo "    sudo systemctl restart ${SERVICE_NAME}"
+    echo "    sudo systemctl stop ${SERVICE_NAME}"
+    echo "    sudo journalctl -u ${SERVICE_NAME} -f"
+    echo ""
+    echo "  Log İzleme:"
+    echo "    tail -f ${INSTALL_DIR}/logs/bot.log"
+    echo "    tail -f ${WORKING_DIR}/logs/bist_bot.log"
+    echo ""
+    echo -e "  Türkiye saati: ${YELLOW}$(TZ=Europe/Istanbul date '+%Y-%m-%d %H:%M:%S')${NC}"
+    echo ""
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+main() {
+    print_banner
+    
+    # Pre-flight checks
+    check_root
+    check_user_exists
+    check_install_dir
+    
+    # Installation
+    install_system_deps
+    create_directories
+    setup_venv
+    fix_permissions
+    create_service
+    setup_logrotate
+    enable_service
+    
+    # Done
+    print_summary
+}
+
+main "$@"

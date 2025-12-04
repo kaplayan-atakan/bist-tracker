@@ -1,64 +1,69 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# =============================================================================
+# BİST Trading Bot - Uninstall Script
+# =============================================================================
 #
-# BİST Trading Bot - Servis Kaldırma Scripti
+# Servisi kaldırır. Bot dosyaları ve kullanıcı hesabı silinmez.
 #
-# Kullanım:
-#   chmod +x uninstall_service.sh
-#   sudo ./uninstall_service.sh
+# Kullanım: sudo bash deployment/uninstall_service.sh
 #
+# =============================================================================
 
-set -e
+set -euo pipefail
 
-# Renkli çıktı
-RED='\033[0;31m'
+# Configuration
+SERVICE_NAME="bist-trading-bot"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
+
+# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
+info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+
+# =============================================================================
+# Main
+# =============================================================================
+
+echo ""
 echo -e "${YELLOW}=============================================${NC}"
-echo -e "${YELLOW}  BİST Trading Bot - Servis Kaldırma         ${NC}"
+echo -e "${YELLOW}  BİST Trading Bot - Uninstall Script        ${NC}"
 echo -e "${YELLOW}=============================================${NC}"
+echo ""
 
 # Root kontrolü
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}Lütfen root olarak çalıştırın: sudo ./uninstall_service.sh${NC}"
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}Bu script root olarak çalıştırılmalıdır: sudo bash $0${NC}"
     exit 1
 fi
 
-SERVICE_NAME="bist-trading-bot"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+# 1. Servisi durdur
+info "Servis durduruluyor..."
+systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
 
-echo ""
-echo -e "${YELLOW}[1/3] Servis durduruluyor...${NC}"
-if systemctl is-active --quiet ${SERVICE_NAME}; then
-    systemctl stop ${SERVICE_NAME}
-    echo "  Servis durduruldu"
-else
-    echo "  Servis zaten çalışmıyor"
-fi
+# 2. Servisi devre dışı bırak
+info "Servis devre dışı bırakılıyor..."
+systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
 
-echo ""
-echo -e "${YELLOW}[2/3] Servis devre dışı bırakılıyor...${NC}"
-if systemctl is-enabled --quiet ${SERVICE_NAME} 2>/dev/null; then
-    systemctl disable ${SERVICE_NAME}
-    echo "  Servis devre dışı bırakıldı"
-else
-    echo "  Servis zaten devre dışı"
-fi
+# 3. Service dosyasını sil
+info "Service dosyası siliniyor..."
+rm -f "${SERVICE_FILE}"
 
-echo ""
-echo -e "${YELLOW}[3/3] Servis dosyası siliniyor...${NC}"
-if [ -f "${SERVICE_FILE}" ]; then
-    rm ${SERVICE_FILE}
-    systemctl daemon-reload
-    echo "  Servis dosyası silindi"
-else
-    echo "  Servis dosyası bulunamadı"
-fi
+# 4. Logrotate config'ini sil
+info "Logrotate config siliniyor..."
+rm -f "${LOGROTATE_FILE}"
+
+# 5. Systemd'yi yenile
+info "Systemd yenileniyor..."
+systemctl daemon-reload
 
 echo ""
 echo -e "${GREEN}=============================================${NC}"
-echo -e "${GREEN}  Servis Başarıyla Kaldırıldı               ${NC}"
+echo -e "${GREEN}  Servis Başarıyla Kaldırıldı                ${NC}"
 echo -e "${GREEN}=============================================${NC}"
 echo ""
 echo "  Not: Bot dosyaları ve kullanıcı hesabı silinmedi."
