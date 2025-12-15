@@ -1,0 +1,8 @@
+# PMR Bot Dependencies
+# Minimal requirements for Pre-Manipulation Radar module
+
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.28.0
+yfinance>=0.2.30
+python-dotenv>=1.0.0

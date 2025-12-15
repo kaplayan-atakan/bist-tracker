@@ -126,11 +126,21 @@ setup_venv() {
     info "Python bağımlılıkları yükleniyor..."
     sudo -u "${BOT_USER}" "${PIP_BIN}" install --upgrade pip -q
     
+    # Core requirements (mandatory)
     if [[ -f "${WORKING_DIR}/requirements.txt" ]]; then
         sudo -u "${BOT_USER}" "${PIP_BIN}" install -r "${WORKING_DIR}/requirements.txt" -q
-        info "Bağımlılıklar yüklendi"
+        info "core-src/requirements.txt yüklendi"
     else
         warn "requirements.txt bulunamadı: ${WORKING_DIR}/requirements.txt"
+    fi
+    
+    # PMR requirements (optional - warn and continue if missing)
+    PMR_REQ="${INSTALL_DIR}/pmr/requirements.txt"
+    if [[ -f "${PMR_REQ}" ]]; then
+        sudo -u "${BOT_USER}" "${PIP_BIN}" install -r "${PMR_REQ}" -q
+        info "pmr/requirements.txt yüklendi"
+    else
+        warn "pmr/requirements.txt bulunamadı, PMR bağımlılık yüklemesi atlanıyor"
     fi
 }
 
