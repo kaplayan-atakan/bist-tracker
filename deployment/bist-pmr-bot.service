@@ -1,0 +1,24 @@
+[Unit]
+Description=BIST PMR Bot - Pre-Manipulation Radar
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+Group=botuser
+WorkingDirectory=/home/botuser/bist-tracker
+ExecStart=/home/botuser/bist-tracker/.venv/bin/python -m pmr.cli continuous
+Restart=on-failure
+RestartSec=30
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+Environment="TZ=Europe/Istanbul"
+
+# Logging
+StandardOutput=append:/home/botuser/bist-tracker/logs/pmr.log
+StandardError=append:/home/botuser/bist-tracker/logs/pmr_error.log
+
+[Install]
+WantedBy=multi-user.target

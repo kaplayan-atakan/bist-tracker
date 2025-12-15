@@ -1,185 +1,207 @@
-# BİST Trading Bot - VPS Deployment
+# BİST Tracker - VPS Deployment
 
-Production-tested deployment guide for Ubuntu VPS.
+Production deployment guide for Ubuntu VPS. Both bots (Trading Bot + PMR Bot) run independently.
 
-## Hızlı Başlangıç
+---
 
-### İlk Kurulum (Fresh Install)
+## Canonical Files
 
-```bash
-# 1. VPS'e bağlan
-ssh root@your-vps-ip
+| File | Description |
+|------|-------------|
+| `deployment/bist-trading-bot.service` | Trading Bot systemd unit (copied to `/etc/systemd/system/`) |
+| `deployment/bist-pmr-bot.service` | PMR Bot systemd unit (copied to `/etc/systemd/system/`) |
+| `deployment/update.sh` | Update script (copies unit files, installs deps, restarts services) |
 
-# 2. Bot kullanıcısı oluştur (yoksa)
-useradd -m -s /bin/bash botuser
+---
 
-# 3. Repo'yu klonla
-git clone https://github.com/your-repo/bist-tracker.git /home/botuser/bist-tracker
+## Update After Code Changes
 
-# 4. Kurulum scriptini çalıştır
-sudo bash /home/botuser/bist-tracker/deployment/install_service.sh
-```
-
-### Güncelleme (Update)
+This is the canonical workflow to update both bots on VPS:
 
 ```bash
-# 1. Kodu çek
 cd /home/botuser/bist-tracker
-sudo -u botuser git pull
-
-# 2. Güncelle ve yeniden başlat
+git pull
 sudo bash deployment/update.sh
 ```
 
----
-
-## Dizin Yapısı
-
-```
-/home/botuser/bist-tracker/
-├── .venv/                      # Python virtual environment
-├── core-src/                   # Ana kod
-│   ├── main.py                 # Entry point
-│   ├── config.py               # Ayarlar
-│   ├── logs/                   # Bot logları (bist_bot.log)
-│   └── ...
-├── deployment/                 # Deployment scriptleri
-│   ├── install_service.sh      # İlk kurulum
-│   ├── update.sh               # Güncelleme
-│   ├── uninstall_service.sh    # Kaldırma
-│   └── README.md               # Bu dosya
-├── logs/                       # Systemd logları (bot.log, error.log)
-└── ...
-```
+The `update.sh` script will:
+1. Create log directories
+2. Install Python dependencies from both `core-src/requirements.txt` and `pmr/requirements.txt`
+3. Fix permissions
+4. Copy unit files to `/etc/systemd/system/`
+5. Reload systemd and restart both services
+6. Verify both services are running
 
 ---
 
-## Servis Yönetimi
+## Service Management
+
+### Trading Bot
 
 ```bash
-# Durum kontrolü
 sudo systemctl status bist-trading-bot
-
-# Başlat / Durdur / Yeniden başlat
 sudo systemctl start bist-trading-bot
 sudo systemctl stop bist-trading-bot
 sudo systemctl restart bist-trading-bot
+```
 
-# Otomatik başlatmayı aç/kapat
-sudo systemctl enable bist-trading-bot
-sudo systemctl disable bist-trading-bot
+### PMR Bot
+
+```bash
+sudo systemctl status bist-pmr-bot
+sudo systemctl start bist-pmr-bot
+sudo systemctl stop bist-pmr-bot
+sudo systemctl restart bist-pmr-bot
 ```
 
 ---
 
-## Log İzleme
+## Log Commands
+
+### Trading Bot Logs
 
 ```bash
-# Systemd logları (realtime)
+# Systemd journal (realtime)
 sudo journalctl -u bist-trading-bot -f
 
-# Son 100 satır
-sudo journalctl -u bist-trading-bot -n 100
+# Last 100 lines
+sudo journalctl -u bist-trading-bot -n 100 --no-pager
 
-# Bot logları
+# File logs
 tail -f /home/botuser/bist-tracker/logs/bot.log
-tail -f /home/botuser/bist-tracker/core-src/logs/bist_bot.log
-
-# Hata logları
 tail -f /home/botuser/bist-tracker/logs/error.log
+tail -f /home/botuser/bist-tracker/core-src/logs/bist_bot.log
+```
+
+### PMR Bot Logs
+
+```bash
+# Systemd journal (realtime)
+sudo journalctl -u bist-pmr-bot -f
+
+# Last 100 lines
+sudo journalctl -u bist-pmr-bot -n 100 --no-pager
+
+# File logs
+tail -f /home/botuser/bist-tracker/logs/pmr.log
+tail -f /home/botuser/bist-tracker/logs/pmr_error.log
 ```
 
 ---
 
-## Ortam Değişkenleri
-
-Telegram credentials `.env` dosyasında veya environment'ta:
+## Fresh Install
 
 ```bash
-# Option 1: .env dosyası (core-src içinde)
-echo "TELEGRAM_BOT_TOKEN=your_token" >> /home/botuser/bist-tracker/core-src/.env
-echo "TELEGRAM_CHAT_ID=your_chat_id" >> /home/botuser/bist-tracker/core-src/.env
+# 1. Connect to VPS
+ssh root@your-vps-ip
 
-# Option 2: Systemd override
-sudo systemctl edit bist-trading-bot
-# Ekle:
-# [Service]
-# Environment="TELEGRAM_BOT_TOKEN=your_token"
-# Environment="TELEGRAM_CHAT_ID=your_chat_id"
+# 2. Create bot user (if not exists)
+useradd -m -s /bin/bash botuser
+
+# 3. Clone repo
+git clone https://github.com/your-repo/bist-tracker.git /home/botuser/bist-tracker
+
+# 4. Create venv
+sudo -u botuser python3 -m venv /home/botuser/bist-tracker/.venv
+
+# 5. Run install script
+sudo bash /home/botuser/bist-tracker/deployment/install_service.sh
+```
+
+---
+
+## Environment Variables
+
+Telegram credentials are read from `.env` file:
+
+```bash
+# Create .env in project root
+cat > /home/botuser/bist-tracker/.env << 'EOF'
+TELEGRAM_BOT_TOKEN=your_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+DRY_RUN_MODE=false
+EOF
+
+chown botuser:botuser /home/botuser/bist-tracker/.env
+chmod 600 /home/botuser/bist-tracker/.env
 ```
 
 ---
 
 ## Troubleshooting
 
-### Bot başlamıyor
+### Service not starting
+
 ```bash
-# Manuel çalıştır
+# Check status
+sudo systemctl status bist-trading-bot
+sudo systemctl status bist-pmr-bot
+
+# View recent logs
+sudo journalctl -u bist-trading-bot -n 50 --no-pager
+sudo journalctl -u bist-pmr-bot -n 50 --no-pager
+
+# Manual run (for debugging)
 sudo -u botuser /home/botuser/bist-tracker/.venv/bin/python /home/botuser/bist-tracker/core-src/main.py
-
-# Detaylı loglar
-sudo journalctl -u bist-trading-bot -n 100 --no-pager
+sudo -u botuser /home/botuser/bist-tracker/.venv/bin/python -m pmr.cli continuous
 ```
 
-### Permission denied hataları
+### Permission errors
+
 ```bash
-# İzinleri düzelt
+# Fix ownership
 sudo chown -R botuser:botuser /home/botuser/bist-tracker
+
+# Re-run update script
+sudo bash /home/botuser/bist-tracker/deployment/update.sh
 ```
 
-### Python modül bulunamadı
+### Missing Python modules
+
 ```bash
-# Bağımlılıkları yeniden yükle
+# Reinstall dependencies
 sudo -u botuser /home/botuser/bist-tracker/.venv/bin/pip install -r /home/botuser/bist-tracker/core-src/requirements.txt
+sudo -u botuser /home/botuser/bist-tracker/.venv/bin/pip install -r /home/botuser/bist-tracker/pmr/requirements.txt
 ```
 
 ---
 
-## Tam Kaldırma
+## Directory Structure
 
-```bash
-# Servisi kaldır
-sudo bash /home/botuser/bist-tracker/deployment/uninstall_service.sh
-
-# Dosyaları sil (opsiyonel)
-sudo rm -rf /home/botuser/bist-tracker
-
-# Kullanıcıyı sil (opsiyonel)
-sudo userdel -r botuser
+```
+/home/botuser/bist-tracker/
+├── .venv/                      # Python virtual environment
+├── .env                        # Telegram credentials
+├── core-src/                   # Trading Bot code
+│   ├── main.py
+│   ├── requirements.txt
+│   └── logs/
+├── pmr/                        # PMR Bot code
+│   ├── cli.py
+│   └── requirements.txt
+├── deployment/
+│   ├── bist-trading-bot.service  # Canonical unit file
+│   ├── bist-pmr-bot.service      # Canonical unit file
+│   ├── update.sh                 # Update script
+│   └── README.md
+└── logs/                       # Shared log directory
+    ├── bot.log
+    ├── error.log
+    ├── pmr.log
+    └── pmr_error.log
 ```
 
 ---
 
-## Önemli Bilgiler
+## Quick Reference
 
-| Parametre | Değer |
-|-----------|-------|
+| Item | Value |
+|------|-------|
 | **User** | `botuser` |
 | **Install Dir** | `/home/botuser/bist-tracker` |
-| **Working Dir** | `/home/botuser/bist-tracker/core-src` |
 | **Venv** | `/home/botuser/bist-tracker/.venv` |
 | **Python** | `/home/botuser/bist-tracker/.venv/bin/python` |
-| **Service** | `bist-trading-bot` |
+| **Trading Bot Service** | `bist-trading-bot` |
+| **PMR Bot Service** | `bist-pmr-bot` |
 | **Timezone** | `Europe/Istanbul` |
-| **Market Hours** | 10:00-18:00 (Pazartesi-Cuma) |
-
----
-
-## Veri Gecikmesi Uyarısı
-
-> **ÖNEMLİ**: TradingView free tier ile veriler **15 dakika gecikmelidir**.
-> 
-> Bu gecikme:
-> - ✅ **Swing trading** için uygundur
-> - ✅ **Pozisyon trading** için uygundur
-> - ❌ **Day trading / Scalping** için uygun DEĞİLDİR
-
----
-
-## Güncelleme Notları
-
-**v1.1 (Current):**
-- ✅ Timezone sorunu düzeltildi (`utils/timezone.py`)
-- ✅ TradingView HTTP öncelikli (`config.py`)
-- ✅ İki ayrı log dizini desteği
-- ✅ Production-tested deployment scriptleri
+| **Market Hours** | 10:00-18:00 (Mon-Fri) |

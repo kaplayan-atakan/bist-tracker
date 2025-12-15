@@ -1,109 +1,181 @@
 #!/usr/bin/env bash
 # =============================================================================
-# BİST Trading Bot - Update Script
+# BİST Tracker - Update Script
 # =============================================================================
+# Canonical unit files in repo, copied to /etc/systemd/system/ on every run.
 #
-# git pull yaptıktan sonra tek komutla bot'u günceller:
-# - Yeni bağımlılıkları yükler
-# - İzinleri düzeltir
-# - Servisi yeniden başlatır
-#
-# Kullanım:
+# Usage:
 #   cd /home/botuser/bist-tracker
 #   git pull
 #   sudo bash deployment/update.sh
-#
 # =============================================================================
 
 set -euo pipefail
 
 # =============================================================================
-# Configuration
+# Constants
 # =============================================================================
 
 BOT_USER="botuser"
-BOT_GROUP="botuser"
-INSTALL_DIR="/home/${BOT_USER}/bist-tracker"
-WORKING_DIR="${INSTALL_DIR}/core-src"
-VENV_DIR="${INSTALL_DIR}/.venv"
-PIP_BIN="${VENV_DIR}/bin/pip"
-SERVICE_NAME="bist-trading-bot"
+INSTALL_DIR="/home/botuser/bist-tracker"
+VENV="${INSTALL_DIR}/.venv"
+PYTHON="${VENV}/bin/python"
+PIP="${VENV}/bin/pip"
+SERVICE_DIR="/etc/systemd/system"
 
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-step()  { echo -e "${BLUE}[STEP]${NC} $1"; }
+SERVICES=("bist-trading-bot" "bist-pmr-bot")
 
 # =============================================================================
-# Main
+# Helpers
+# =============================================================================
+
+info()  { echo "[INFO] $1"; }
+ok()    { echo "[OK]   $1"; }
+err()   { echo "[ERROR] $1" >&2; exit 1; }
+
+# =============================================================================
+# Validations
 # =============================================================================
 
 echo ""
-echo -e "${GREEN}=============================================${NC}"
-echo -e "${GREEN}  BİST Trading Bot - Update Script           ${NC}"
-echo -e "${GREEN}=============================================${NC}"
+echo "==========================================="
+echo "  BİST Tracker - Update Script"
+echo "==========================================="
 echo ""
 
-# Root kontrolü
+# Must be root
 if [[ $EUID -ne 0 ]]; then
-    error "Bu script root olarak çalıştırılmalıdır: sudo bash $0"
+    err "Bu script root olarak çalıştırılmalı: sudo bash $0"
 fi
 
-# Kurulum dizini kontrolü
-if [[ ! -f "${WORKING_DIR}/main.py" ]]; then
-    error "main.py bulunamadı: ${WORKING_DIR}/main.py"
+# Check install dir
+if [[ ! -d "${INSTALL_DIR}" ]]; then
+    err "Kurulum dizini bulunamadı: ${INSTALL_DIR}"
 fi
 
-# 1. Bağımlılıkları güncelle
-step "[1/4] Python bağımlılıkları güncelleniyor..."
-if [[ -f "${WORKING_DIR}/requirements.txt" ]]; then
-    sudo -u "${BOT_USER}" "${PIP_BIN}" install -r "${WORKING_DIR}/requirements.txt" -q
-    info "Bağımlılıklar güncellendi"
-else
-    warn "requirements.txt bulunamadı"
+# Check Python
+if [[ ! -x "${PYTHON}" ]]; then
+    err "Python bulunamadı: ${PYTHON} - Önce venv oluşturun."
 fi
 
-# 2. Log dizinlerini kontrol et
-step "[2/4] Dizinler kontrol ediliyor..."
+info "Validations passed"
+
+# =============================================================================
+# 1. Ensure log directories
+# =============================================================================
+
+info "[1/6] Log dizinleri oluşturuluyor..."
+
 mkdir -p "${INSTALL_DIR}/logs"
-mkdir -p "${WORKING_DIR}/logs"
-info "Log dizinleri hazır"
+mkdir -p "${INSTALL_DIR}/core-src/logs"
+chown -R "${BOT_USER}:${BOT_USER}" "${INSTALL_DIR}/logs"
+chown -R "${BOT_USER}:${BOT_USER}" "${INSTALL_DIR}/core-src/logs"
 
-# 3. İzinleri düzelt
-step "[3/4] İzinler düzeltiliyor..."
-chown -R "${BOT_USER}:${BOT_GROUP}" "${INSTALL_DIR}"
-chmod +x "${INSTALL_DIR}/deployment/"*.sh 2>/dev/null || true
-info "İzinler düzeltildi"
+ok "Log dizinleri hazır"
 
-# 4. Servisi yeniden başlat
-step "[4/4] Servis yeniden başlatılıyor..."
-systemctl daemon-reload
-systemctl restart "${SERVICE_NAME}"
+# =============================================================================
+# 2. Install Python dependencies
+# =============================================================================
 
-sleep 3
+info "[2/6] Python bağımlılıkları yükleniyor..."
 
-if systemctl is-active --quiet "${SERVICE_NAME}"; then
-    info "✅ Servis başarıyla güncellendi ve çalışıyor!"
-else
-    warn "⚠️ Servis başlatılamadı!"
-    warn "   Kontrol: sudo journalctl -u ${SERVICE_NAME} -n 50"
+CORE_REQ="${INSTALL_DIR}/core-src/requirements.txt"
+PMR_REQ="${INSTALL_DIR}/pmr/requirements.txt"
+
+if [[ ! -f "${CORE_REQ}" ]]; then
+    err "Eksik: ${CORE_REQ}"
 fi
 
+if [[ ! -f "${PMR_REQ}" ]]; then
+    err "Eksik: ${PMR_REQ}"
+fi
+
+sudo -u "${BOT_USER}" "${PIP}" install -q -r "${CORE_REQ}"
+sudo -u "${BOT_USER}" "${PIP}" install -q -r "${PMR_REQ}"
+
+ok "Python bağımlılıkları yüklendi"
+
+# =============================================================================
+# 3. Fix permissions
+# =============================================================================
+
+info "[3/6] İzinler düzeltiliyor..."
+
+chown -R "${BOT_USER}:${BOT_USER}" "${INSTALL_DIR}"
+chmod +x "${INSTALL_DIR}/deployment/"*.sh 2>/dev/null || true
+
+ok "İzinler düzeltildi"
+
+# =============================================================================
+# 4. Copy canonical unit files
+# =============================================================================
+
+info "[4/6] Service dosyaları kopyalanıyor..."
+
+cp "${INSTALL_DIR}/deployment/bist-trading-bot.service" "${SERVICE_DIR}/bist-trading-bot.service"
+chmod 0644 "${SERVICE_DIR}/bist-trading-bot.service"
+
+cp "${INSTALL_DIR}/deployment/bist-pmr-bot.service" "${SERVICE_DIR}/bist-pmr-bot.service"
+chmod 0644 "${SERVICE_DIR}/bist-pmr-bot.service"
+
+ok "Unit dosyaları ${SERVICE_DIR}/ içine kopyalandı"
+
+# =============================================================================
+# 5. Reload systemd and restart services
+# =============================================================================
+
+info "[5/6] Systemd yeniden yükleniyor ve servisler başlatılıyor..."
+
+systemctl daemon-reload
+
+for svc in "${SERVICES[@]}"; do
+    systemctl enable "${svc}" --quiet 2>/dev/null || true
+    systemctl restart "${svc}"
+done
+
+ok "Servisler yeniden başlatıldı"
+
+# =============================================================================
+# 6. Health check
+# =============================================================================
+
+info "[6/6] Sağlık kontrolü..."
+
+FAILED=0
+
+for svc in "${SERVICES[@]}"; do
+    if systemctl is-active --quiet "${svc}"; then
+        ok "${svc} çalışıyor ✓"
+    else
+        echo ""
+        echo "[ERROR] ${svc} başlatılamadı!"
+        echo ""
+        systemctl status "${svc}" --no-pager || true
+        echo ""
+        journalctl -u "${svc}" -n 50 --no-pager || true
+        echo ""
+        FAILED=1
+    fi
+done
+
+if [[ $FAILED -eq 1 ]]; then
+    err "Bir veya daha fazla servis başlatılamadı. Yukarıdaki logları inceleyin."
+fi
+
+# =============================================================================
+# Done
+# =============================================================================
+
 echo ""
-echo -e "${GREEN}=============================================${NC}"
-echo -e "${GREEN}  Güncelleme Tamamlandı!                     ${NC}"
-echo -e "${GREEN}=============================================${NC}"
+echo "==========================================="
+echo "  Güncelleme Tamamlandı!"
+echo "==========================================="
 echo ""
-echo "  Log izleme:"
+echo "  Log izleme komutları:"
+echo "    sudo journalctl -u bist-trading-bot -f"
+echo "    sudo journalctl -u bist-pmr-bot -f"
 echo "    tail -f ${INSTALL_DIR}/logs/bot.log"
-echo "    sudo journalctl -u ${SERVICE_NAME} -f"
+echo "    tail -f ${INSTALL_DIR}/logs/pmr.log"
 echo ""
-echo -e "  Türkiye saati: ${YELLOW}$(TZ=Europe/Istanbul date '+%Y-%m-%d %H:%M:%S')${NC}"
+echo "  Türkiye saati: $(TZ=Europe/Istanbul date '+%Y-%m-%d %H:%M:%S')"
 echo ""

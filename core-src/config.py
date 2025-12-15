@@ -69,8 +69,14 @@ SIGNAL_COOLDOWN_MINUTES = 60
 # ================== TELEGRAM AYARLARI ==================
 # Bu bilgileri kendi Telegram bot token'ınız ile değiştirin
 import os
-TELEGRAM_BOT_TOKEN = "7611453017:AAFAz9jBsUQ-N6RUdQ8pnct0gIzV2UeEmIM"
-TELEGRAM_CHAT_ID = "5883922751"
+from dotenv import load_dotenv
+
+# .env dosyasını yükle (üst dizinde olabilir)
+load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7611453017:AAFAz9jBsUQ-N6RUdQ8pnct0gIzV2UeEmIM")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5883922751")
 
 # Dry-run modu (True ise Telegram'a göndermez, sadece log'lar)
 DRY_RUN_MODE = os.getenv("DRY_RUN_MODE", "false").lower() == "true"

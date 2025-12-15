@@ -134,6 +134,18 @@ class ScanErrorLogger:
         timestamp = datetime.now().strftime("%H:%M:%S")
         line = f"{timestamp} | 🔴 ERROR | {context:20} | {error}"
         self._write_line(line)
+
+    def log_filter_rejection(self, symbol: str, reason: str):
+        """
+        Filtre reddini loglar (Hata değildir).
+        
+        Args:
+            symbol: Sembol kodu
+            reason: Red sebebi
+        """
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        line = f"{timestamp} | 🟡 FILTER | {symbol:20} | {reason}"
+        self._write_line(line)
     
     def log_provider_issue(self, provider: str, symbol: str, issue: str):
         """

@@ -1257,7 +1257,7 @@ class BISTTradingBot:
                     filter_rejected += 1
                     if filter_rejected <= 5:
                         logger.info(f"❌ {symbol}: Filtre reddetti - {filter_reason}")
-                        scan_error_logger.log_error(f"filter_{symbol}", filter_reason)
+                        scan_error_logger.log_filter_rejection(symbol, filter_reason)
                     continue
                 
                 # Momentum, hacim ve PA indikatörleri (anlık hesapla)

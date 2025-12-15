@@ -29,8 +29,10 @@ VENV_DIR="${INSTALL_DIR}/.venv"
 PYTHON_BIN="${VENV_DIR}/bin/python"
 PIP_BIN="${VENV_DIR}/bin/pip"
 SERVICE_NAME="bist-trading-bot"
+PMR_SERVICE_NAME="bist-pmr-bot"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
+PMR_SERVICE_FILE="/etc/systemd/system/${PMR_SERVICE_NAME}.service"
+LOGROTATE_FILE="/etc/logrotate.d/bist-bots"
 
 # Colors for output
 RED='\033[0;31m'
@@ -150,9 +152,9 @@ fix_permissions() {
 }
 
 create_service() {
-    step "[5/7] Systemd servisi oluşturuluyor..."
+    step "[5/7] Systemd servisleri oluşturuluyor..."
     
-    # Basit, test edilmiş service dosyası
+    # 1. Ana Trading Bot Servisi
     cat << EOF > "${SERVICE_FILE}"
 [Unit]
 Description=BIST Trading Bot - Automated Stock Scanner
@@ -176,6 +178,31 @@ WantedBy=multi-user.target
 EOF
 
     info "Service dosyası oluşturuldu: ${SERVICE_FILE}"
+
+    # 2. PMR Bot Servisi
+    cat << EOF > "${PMR_SERVICE_FILE}"
+[Unit]
+Description=BIST PMR Bot - Pre-Manipulation Radar
+After=network.target
+
+[Service]
+Type=simple
+User=${BOT_USER}
+Group=${BOT_GROUP}
+WorkingDirectory=${INSTALL_DIR}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Europe/Istanbul
+ExecStart=${PYTHON_BIN} -m pmr.cli continuous
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:${INSTALL_DIR}/logs/pmr_bot.log
+StandardError=append:${INSTALL_DIR}/logs/pmr_error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    info "Service dosyası oluşturuldu: ${PMR_SERVICE_FILE}"
 }
 
 setup_logrotate() {
@@ -207,29 +234,43 @@ EOF
 }
 
 enable_service() {
-    step "[7/7] Servis etkinleştiriliyor..."
+    step "[7/7] Servisler etkinleştiriliyor..."
     
     systemctl daemon-reload
-    systemctl enable "${SERVICE_NAME}"
     
-    # Eğer servis zaten çalışıyorsa restart, değilse start
+    # --- Trading Bot ---
+    systemctl enable "${SERVICE_NAME}"
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
         systemctl restart "${SERVICE_NAME}"
-        info "Servis yeniden başlatıldı"
+        info "${SERVICE_NAME} yeniden başlatıldı"
     else
         systemctl start "${SERVICE_NAME}"
-        info "Servis başlatıldı"
+        info "${SERVICE_NAME} başlatıldı"
+    fi
+
+    # --- PMR Bot ---
+    systemctl enable "${PMR_SERVICE_NAME}"
+    if systemctl is-active --quiet "${PMR_SERVICE_NAME}"; then
+        systemctl restart "${PMR_SERVICE_NAME}"
+        info "${PMR_SERVICE_NAME} yeniden başlatıldı"
+    else
+        systemctl start "${PMR_SERVICE_NAME}"
+        info "${PMR_SERVICE_NAME} başlatıldı"
     fi
     
     # Durumu kontrol et
     sleep 3
     
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
-        info "✅ Servis başarıyla çalışıyor!"
+        info "✅ ${SERVICE_NAME} başarıyla çalışıyor!"
     else
-        warn "⚠️ Servis başlatılamadı. Kontrol edin:"
-        warn "   sudo journalctl -u ${SERVICE_NAME} -n 50"
-        warn "   sudo ${PYTHON_BIN} ${WORKING_DIR}/main.py"
+        warn "⚠️ ${SERVICE_NAME} başlatılamadı."
+    fi
+
+    if systemctl is-active --quiet "${PMR_SERVICE_NAME}"; then
+        info "✅ ${PMR_SERVICE_NAME} başarıyla çalışıyor!"
+    else
+        warn "⚠️ ${PMR_SERVICE_NAME} başlatılamadı."
     fi
 }
 
@@ -243,23 +284,20 @@ print_summary() {
     echo -e "${GREEN}  Kurulum Tamamlandı!                        ${NC}"
     echo -e "${GREEN}=============================================${NC}"
     echo ""
-    echo "  Servis: ${SERVICE_NAME}"
+    echo "  Servisler:"
+    echo "    - ${SERVICE_NAME}"
+    echo "    - ${PMR_SERVICE_NAME}"
     echo "  Kullanıcı: ${BOT_USER}"
     echo "  Dizin: ${INSTALL_DIR}"
     echo "  Loglar:"
     echo "    - ${INSTALL_DIR}/logs/bot.log"
-    echo "    - ${INSTALL_DIR}/logs/error.log"
-    echo "    - ${WORKING_DIR}/logs/bist_bot.log"
+    echo "    - ${INSTALL_DIR}/logs/pmr_bot.log"
     echo ""
     echo "  Yönetim Komutları:"
     echo "    sudo systemctl status ${SERVICE_NAME}"
+    echo "    sudo systemctl status ${PMR_SERVICE_NAME}"
     echo "    sudo systemctl restart ${SERVICE_NAME}"
-    echo "    sudo systemctl stop ${SERVICE_NAME}"
-    echo "    sudo journalctl -u ${SERVICE_NAME} -f"
-    echo ""
-    echo "  Log İzleme:"
-    echo "    tail -f ${INSTALL_DIR}/logs/bot.log"
-    echo "    tail -f ${WORKING_DIR}/logs/bist_bot.log"
+    echo "    sudo systemctl restart ${PMR_SERVICE_NAME}"
     echo ""
     echo -e "  Türkiye saati: ${YELLOW}$(TZ=Europe/Istanbul date '+%Y-%m-%d %H:%M:%S')${NC}"
     echo ""

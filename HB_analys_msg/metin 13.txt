@@ -1,0 +1,2624 @@
+
+#!/usr/bin/env python3
+"""
+BIST Pre-Manipulation Radar (PMR) v1.0
+Ana Çalıştırma Scripti
+
+Kullanım:
+    python main.py [mod] [opsiyonlar]
+
+Modlar:
+    single SYMBOL    - Tek hisse tara
+    scan             - Tüm evreni bir kez tara
+    continuous       - Sürekli tarama modu (varsayılan)
+    report           - Watchlist raporu göster
+    
+Örnekler:
+    python main.py single THYAO
+    python main.py scan
+    python main.py continuous
+    python main.py report
+"""
+
+import sys
+import argparse
+from datetime import datetime
+
+from pmr_scanner import PMRScanner
+from pmr_config import *
+
+
+def print_banner():
+    """Banner yazdır"""
+    banner = """
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║   BIST Pre-Manipulation Radar (PMR) v1.0                    ║
+║   Manipülasyon Erken Uyarı Sistemi                          ║
+║                                                              ║
+║   © 2025 - Yalnızca eğitim amaçlıdır                        ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+Başlangıç: {time}
+Veri Kaynağı: {source}
+Telegram: {telegram_status}
+
+""".format(
+        time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        source=DATA_SOURCE.upper(),
+        telegram_status="AÇIK ✓" if TELEGRAM_ENABLED else "KAPALI ✗"
+    )
+    print(banner)
+
+
+def mode_single(scanner: PMRScanner, symbol: str):
+    """Tek hisse tarama modu"""
+    print(f"\n{'='*60}")
+    print(f"TEK HİSSE TARAMASI: {symbol}")
+    print(f"{'='*60}\n")
+    
+    result = scanner.scan_symbol(symbol)
+    
+    if result is None:
+        print(f"\n❌ {symbol} için sonuç üretilemedi (veri yetersiz veya likidite düşük)\n")
+        return
+    
+    # Detaylı sonuç
+    print(f"\n{'='*60}")
+    print(f"SONUÇ: {result['symbol']}")
+    print(f"{'='*60}")
+    print(f"\n📊 PMR Score: {result['score']:.1f} / 100")
+    print(f"🏷️  Etiket: {result['label']}")
+    print(f"✅ İşlem yapılabilir: {'EVET' if result['tradeable'] else 'HAYIR'}")
+    
+    print(f"\n📈 Alt Skorlar:")
+    print(f"  • Accumulation (A): {result['A']:.1f} / {MAX_ACCUMULATION}")
+    print(f"  • Volatility (V): {result['V']:.1f} / {MAX_VOLATILITY}")
+    print(f"  • Absorption (O): {result['O']:.1f} / {MAX_ABSORPTION}")
+    print(f"  • Flow (F): {result['F']:.1f} / {MAX_FLOW}")
+    print(f"  • Context (C): {result['C']:.1f} / {MAX_CONTEXT}")
+    
+    print(f"\n📝 Nedenler:")
+    reasons = result['reasons']
+    
+    if reasons.get('A_reasons'):
+        print(f"\n  Accumulation:")
+        for reason in reasons['A_reasons']:
+            print(f"    - {reason}")
+    
+    if reasons.get('V_reasons'):
+        print(f"\n  Volatilite:")
+        for reason in reasons['V_reasons']:
+            print(f"    - {reason}")
+    
+    if reasons.get('O_reasons'):
+        print(f"\n  Order Book:")
+        for reason in reasons['O_reasons']:
+            print(f"    - {reason}")
+    
+    if reasons.get('F_reasons'):
+        print(f"\n  İşlem Akışı:")
+        for reason in reasons['F_reasons']:
+            print(f"    - {reason}")
+    
+    if reasons.get('C_reasons'):
+        print(f"\n  Context:")
+        for reason in reasons['C_reasons']:
+            print(f"    - {reason}")
+    
+    if result['risk_note']:
+        print(f"\n⚠️  Risk Notu:")
+        print(f"  {result['risk_note']}")
+    
+    print("\n" + "="*60 + "\n")
+
+
+def mode_scan(scanner: PMRScanner):
+    """Evren tarama modu (bir kez)"""
+    print(f"\n{'='*60}")
+    print(f"EVREN TARAMASI")
+    print(f"{'='*60}\n")
+    
+    results = scanner.scan_universe(notify=True)
+    
+    print(f"\n{'='*60}")
+    print(f"TARAMA TAMAMLANDI")
+    print(f"{'='*60}")
+    
+    print(f"\nToplam: {len(results)} hisse işlendi")
+    
+    # Skor dağılımı
+    very_high = [r for r in results if r['score'] >= SCORE_THRESHOLD_VERY_HIGH]
+    high = [r for r in results if SCORE_THRESHOLD_HIGH <= r['score'] < SCORE_THRESHOLD_VERY_HIGH]
+    medium = [r for r in results if SCORE_THRESHOLD_MEDIUM <= r['score'] < SCORE_THRESHOLD_HIGH]
+    low = [r for r in results if r['score'] < SCORE_THRESHOLD_MEDIUM]
+    
+    print(f"\nSkor Dağılımı:")
+    print(f"  🔥 Çok Yüksek (≥75): {len(very_high)}")
+    print(f"  🟠 Yüksek (60-74): {len(high)}")
+    print(f"  🟡 Orta (45-59): {len(medium)}")
+    print(f"  🟢 Düşük (<45): {len(low)}")
+    
+    # Top 10
+    if results:
+        print(f"\n🏆 Top 10 Yüksek Skor:")
+        sorted_results = sorted(results, key=lambda x: x['score'], reverse=True)
+        for idx, r in enumerate(sorted_results[:10], 1):
+            emoji = "🔥" if r['score'] >= 75 else "🟠" if r['score'] >= 60 else "🟡"
+            print(f"  {idx:2d}. {emoji} {r['symbol']:10s} - {r['score']:5.1f} - {r['label']}")
+    
+    # Watchlist raporu
+    print(f"\n{scanner.get_watchlist_report()}")
+    
+    print("\n" + "="*60 + "\n")
+
+
+def mode_continuous(scanner: PMRScanner):
+    """Sürekli tarama modu"""
+    print(f"\n{'='*60}")
+    print(f"SÜREKLİ TARAMA MODU")
+    print(f"{'='*60}")
+    print(f"\nTarama aralığı: {SCAN_INTERVAL_SECONDS} saniye")
+    print(f"Durdurmak için: Ctrl+C\n")
+    
+    try:
+        scanner.run_continuous(interval_seconds=SCAN_INTERVAL_SECONDS)
+    except KeyboardInterrupt:
+        print("\n\n[PMR] Tarama durduruldu\n")
+
+
+def mode_report(scanner: PMRScanner):
+    """Watchlist raporu modu"""
+    print(f"\n{'='*60}")
+    print(f"WATCHLIST RAPORU")
+    print(f"{'='*60}\n")
+    
+    report = scanner.get_watchlist_report()
+    print(report)
+    
+    # Top signals detay
+    top_signals = scanner.get_top_signals(10)
+    
+    if top_signals:
+        print("\n" + "="*60)
+        print("DETAYLI BİLGİLER (Top 10)")
+        print("="*60)
+        
+        for idx, signal in enumerate(top_signals, 1):
+            print(f"\n{idx}. {signal['symbol']} - Score: {signal['score']:.1f}")
+            print(f"   Etiket: {signal['label']}")
+            print(f"   Zaman: {signal['timestamp']}")
+    
+    print("\n" + "="*60 + "\n")
+
+
+def main():
+    """Ana fonksiyon"""
+    parser = argparse.ArgumentParser(
+        description="BIST Pre-Manipulation Radar (PMR) v1.0",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument(
+        'mode',
+        nargs='?',
+        default='continuous',
+        choices=['single', 'scan', 'continuous', 'report'],
+        help='Çalışma modu (varsayılan: continuous)'
+    )
+    
+    parser.add_argument(
+        'symbol',
+        nargs='?',
+        help='Hisse kodu (single modu için)'
+    )
+    
+    parser.add_argument(
+        '--source',
+        choices=['mock', 'api'],
+        default=DATA_SOURCE,
+        help='Veri kaynağı (varsayılan: config dosyasından)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Banner
+    print_banner()
+    
+    # Scanner oluştur
+    scanner = PMRScanner(data_source=args.source)
+    
+    # Mod çalıştır
+    try:
+        if args.mode == 'single':
+            if not args.symbol:
+                print("❌ HATA: 'single' modu için hisse kodu gerekli")
+                print("Kullanım: python main.py single THYAO\n")
+                sys.exit(1)
+            mode_single(scanner, args.symbol.upper())
+        
+        elif args.mode == 'scan':
+            mode_scan(scanner)
+        
+        elif args.mode == 'continuous':
+            mode_continuous(scanner)
+        
+        elif args.mode == 'report':
+            mode_report(scanner)
+    
+    except Exception as e:
+        print(f"\n❌ HATA: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+
+"""
+BIST PMR v1.0 - Ana Tarayıcı (Scanner)
+Tüm modülleri birleştirerek hisse taraması yapar
+"""
+
+import pandas as pd
+from datetime import datetime
+from typing import Dict, Optional
+import time
+
+from pmr_config import *
+from pmr_data import DataProvider, OrderBookTracker
+from pmr_features import FeatureExtractor
+from pmr_scoring import ScoringEngine, RiskGuard
+from pmr_notifier import TelegramNotifier, Watchlist, Logger
+
+
+class PMRScanner:
+    """Pre-Manipulation Radar Scanner"""
+    
+    def __init__(self, data_source: str = DATA_SOURCE):
+        """
+        Args:
+            data_source: "mock" veya "api"
+        """
+        self.data_provider = DataProvider(source=data_source)
+        self.feature_extractor = FeatureExtractor()
+        self.scoring_engine = ScoringEngine()
+        self.risk_guard = RiskGuard()
+        self.telegram = TelegramNotifier()
+        self.watchlist = Watchlist()
+        self.logger = Logger()
+        
+        # Order book tracker (L2 için)
+        self.ob_tracker = OrderBookTracker(window_minutes=ABSORPTION_WINDOW_MINUTES)
+        
+        print(f"[PMR] Scanner başlatıldı (data_source: {data_source})")
+    
+    def scan_symbol(self, symbol: str) -> Optional[Dict]:
+        """
+        Tek hisseyi tarar ve PMR skorunu hesaplar
+        
+        Args:
+            symbol: Hisse kodu
+            
+        Returns:
+            dict: {
+                'symbol': str,
+                'score': float,
+                'label': str,
+                'A': float, 'V': float, 'O': float, 'F': float, 'C': float,
+                'reasons': dict,
+                'risk_note': str,
+                'tradeable': bool
+            }
+            veya None (eğer veri yetersizse)
+        """
+        try:
+            # === 1. VERİ TOPLAMA ===
+            bars_1m = self.data_provider.get_ohlcv(symbol, "1m", ACC_LOOKBACK_BARS_1M)
+            bars_5m = self.data_provider.get_ohlcv(symbol, "5m", ACC_LOOKBACK_BARS_5M)
+            bars_daily = self.data_provider.get_ohlcv(symbol, "1d", 30)
+            
+            if bars_1m.empty or bars_5m.empty or bars_daily.empty:
+                print(f"[PMR] {symbol}: Veri yetersiz, atlanıyor")
+                return None
+            
+            daily_stats = self.data_provider.get_daily_stats(symbol)
+            
+            # === 2. LİKİDİTE KONTROLÜ (Erken exit) ===
+            tradeable, risk_note = self.risk_guard.check_liquidity(daily_stats)
+            
+            if not tradeable:
+                print(f"[PMR] {symbol}: {risk_note}")
+                # Çok kötü likidite, daha fazla hesaplama yapmaya gerek yok
+                return None
+            
+            # === 3. FEATURE ÇIKARIMI ===
+            features_acc = self.feature_extractor.extract_accumulation_features(bars_5m)
+            features_vol = self.feature_extractor.extract_volatility_features(bars_5m, bars_daily)
+            
+            # Order Book (L2 varsa)
+            ob_snapshot = self.data_provider.get_orderbook_snapshot(symbol, depth=5)
+            if ob_snapshot:
+                self.ob_tracker.add_snapshot(symbol, ob_snapshot)
+                ob_history = self.ob_tracker.get_history(symbol)
+                features_abs = self.feature_extractor.extract_absorption_features(ob_history)
+            else:
+                features_abs = {}
+            
+            # Trade Prints (varsa)
+            prints_df = self.data_provider.get_trade_prints(symbol, FLOW_WINDOW_MINUTES)
+            if not prints_df.empty:
+                features_flow = self.feature_extractor.extract_flow_features(prints_df)
+            else:
+                features_flow = {}
+            
+            # Fiyat değişimi (absorption/flow için)
+            price_change = 0.0
+            if len(bars_5m) >= 2:
+                price_change = (bars_5m.iloc[-1]['close'] - bars_5m.iloc[-2]['close']) / bars_5m.iloc[-2]['close']
+            
+            # === 4. SKORLAMA ===
+            A, A_reasons = self.scoring_engine.score_accumulation(features_acc)
+            V, V_reasons = self.scoring_engine.score_volatility(features_vol)
+            O, O_reasons = self.scoring_engine.score_absorption(features_abs, price_change)
+            F, F_reasons = self.scoring_engine.score_flow(features_flow, price_change)
+            
+            # Context (mock için basit - gerçekte KAP/sosyal medya entegrasyonu gerekir)
+            C, C_reasons = self.scoring_engine.score_context(
+                symbol, daily_stats, kap_count=0, social_ratio=1.0
+            )
+            
+            total_score, label = self.scoring_engine.calculate_total_score(A, V, O, F, C)
+            
+            # === 5. FALSE POSITIVE KONTROLÜ ===
+            is_fp, fp_reason = self.scoring_engine.check_false_positives(
+                features_acc, features_vol, features_abs, features_flow, 
+                daily_stats, kap_count=0
+            )
+            
+            if is_fp:
+                print(f"[PMR] {symbol}: FP algılandı - {fp_reason}")
+                risk_note += f"\n⚠️ {fp_reason}"
+                # FP ise skoru düşür
+                total_score *= 0.5
+                label = "🟡 FP Risk"
+            
+            # === 6. BAŞLAMA KONTROLÜ ===
+            avg_vol_1m = bars_1m['volume'].mean()
+            started, start_msg = self.risk_guard.check_manipulation_started(bars_1m, avg_vol_1m)
+            
+            if started:
+                risk_note += f"\n{start_msg}"
+                self.telegram.send_start_alert(symbol, start_msg)
+            
+            # === 7. SONUÇ PAKETI ===
+            result = {
+                'symbol': symbol,
+                'score': total_score,
+                'label': label,
+                'A': A,
+                'V': V,
+                'O': O,
+                'F': F,
+                'C': C,
+                'reasons': {
+                    'A': A, 'A_reasons': A_reasons,
+                    'V': V, 'V_reasons': V_reasons,
+                    'O': O, 'O_reasons': O_reasons,
+                    'F': F, 'F_reasons': F_reasons,
+                    'C': C, 'C_reasons': C_reasons
+                },
+                'risk_note': risk_note,
+                'tradeable': tradeable,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Log detayı
+            self.logger.log_scan(
+                symbol, total_score,
+                {
+                    'accumulation': features_acc,
+                    'volatility': features_vol,
+                    'absorption': features_abs,
+                    'flow': features_flow
+                },
+                result['reasons']
+            )
+            
+            return result
+            
+        except Exception as e:
+            print(f"[PMR] {symbol} tarama hatası: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def scan_universe(self, notify: bool = True) -> list:
+        """
+        Tüm evreni tarar
+        
+        Args:
+            notify: Telegram bildirimi gönderilsin mi
+            
+        Returns:
+            list: Tüm sonuçlar
+        """
+        universe = self.data_provider.get_universe()
+        print(f"[PMR] Evren taraması başlıyor: {len(universe)} hisse")
+        
+        results = []
+        
+        for idx, symbol in enumerate(universe):
+            print(f"[PMR] [{idx+1}/{len(universe)}] Taranıyor: {symbol}")
+            
+            result = self.scan_symbol(symbol)
+            
+            if result is None:
+                continue
+            
+            results.append(result)
+            
+            # Yüksek skorlu hisseler için watchlist ve bildirim
+            if result['score'] >= SCORE_THRESHOLD_HIGH:
+                self.watchlist.add(
+                    result['symbol'],
+                    result['score'],
+                    result['label'],
+                    result['reasons']
+                )
+                
+                if notify:
+                    self.telegram.send_alert(
+                        result['symbol'],
+                        result['score'],
+                        result['label'],
+                        result['reasons'],
+                        result['risk_note']
+                    )
+            
+            # Rate limiting (API koruması)
+            time.sleep(0.5)
+        
+        print(f"[PMR] Tarama tamamlandı: {len(results)} hisse işlendi")
+        
+        return results
+    
+    def run_continuous(self, interval_seconds: int = SCAN_INTERVAL_SECONDS):
+        """
+        Sürekli tarama modu
+        
+        Args:
+            interval_seconds: Tarama aralığı (saniye)
+        """
+        print(f"[PMR] Sürekli tarama başlatılıyor (interval: {interval_seconds}s)")
+        
+        iteration = 0
+        
+        while True:
+            try:
+                iteration += 1
+                print(f"\n{'='*60}")
+                print(f"[PMR] İterasyon #{iteration} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"{'='*60}\n")
+                
+                # Tam tarama
+                results = self.scan_universe(notify=True)
+                
+                # Watchlist raporu
+                if iteration % 10 == 0:  # Her 10 iterasyonda bir
+                    report = self.watchlist.generate_report()
+                    print(f"\n{report}")
+                    
+                    # Eski kayıtları temizle
+                    self.watchlist.clear_old(hours=24)
+                
+                # Sleep
+                print(f"\n[PMR] {interval_seconds} saniye bekleniyor...")
+                time.sleep(interval_seconds)
+                
+            except KeyboardInterrupt:
+                print("\n[PMR] Kullanıcı tarafından durduruldu")
+                break
+            except Exception as e:
+                print(f"[PMR] Ana döngü hatası: {e}")
+                import traceback
+                traceback.print_exc()
+                time.sleep(60)  # Hata durumunda 1 dk bekle
+    
+    def get_watchlist_report(self) -> str:
+        """Mevcut watchlist raporunu döner"""
+        return self.watchlist.generate_report()
+    
+    def get_top_signals(self, n: int = 10) -> list:
+        """En yüksek skorlu N hisseyi döner"""
+        return self.watchlist.get_top(n)
+
+
+def main():
+    """Ana fonksiyon - test amaçlı"""
+    print("="*60)
+    print("BIST Pre-Manipulation Radar (PMR) v1.0")
+    print("="*60)
+    
+    # Scanner oluştur
+    scanner = PMRScanner(data_source="mock")  # "api" için gerçek veri kaynağı gerekir
+    
+    # Test: Tek hisse tara
+    print("\n[TEST] Tek hisse taraması:")
+    result = scanner.scan_symbol("THYAO")
+    
+    if result:
+        print(f"\nSonuç:")
+        print(f"  Symbol: {result['symbol']}")
+        print(f"  Score: {result['score']:.1f} / 100")
+        print(f"  Label: {result['label']}")
+        print(f"  A: {result['A']:.1f}, V: {result['V']:.1f}, O: {result['O']:.1f}, F: {result['F']:.1f}, C: {result['C']:.1f}")
+        print(f"  Risk Note: {result['risk_note']}")
+    
+    # Test: Evren taraması
+    print("\n[TEST] Evren taraması:")
+    results = scanner.scan_universe(notify=False)
+    
+    print(f"\nTarama özeti:")
+    print(f"  Toplam: {len(results)} hisse")
+    
+    high_scores = [r for r in results if r['score'] >= SCORE_THRESHOLD_HIGH]
+    print(f"  Yüksek skor (≥60): {len(high_scores)}")
+    
+    if high_scores:
+        print("\n  En yüksek skorlular:")
+        sorted_results = sorted(high_scores, key=lambda x: x['score'], reverse=True)
+        for r in sorted_results[:5]:
+            print(f"    {r['symbol']}: {r['score']:.1f} - {r['label']}")
+    
+    # Watchlist raporu
+    print("\n" + scanner.get_watchlist_report())
+
+
+if __name__ == "__main__":
+    main()
+
+"""
+BIST Pre-Manipulation Radar (PMR) v1.0
+Konfigürasyon ve Sabitler
+"""
+
+# ==================== GENEL AYARLAR ====================
+SCAN_INTERVAL_SECONDS = 120  # 2 dakikada bir tara
+L2_SNAPSHOT_INTERVAL = 5  # Saniye (eğer L2 varsa)
+
+# ==================== EVREN FILTRELERI ====================
+MIN_DAILY_VOLUME_TL = 30_000_000  # 30M TL minimum günlük hacim
+MIN_PRICE = 0.01  # Minimum hisse fiyatı
+MAX_SPREAD_PERCENT = 5.0  # Maksimum spread %
+
+# ==================== FEATURE PARAMETRELERI ====================
+# Accumulation
+ACC_LOOKBACK_BARS_5M = 60  # 5 saatlik 5dk bar
+ACC_LOOKBACK_BARS_1M = 120  # 2 saatlik 1dk bar
+PRICE_FLAT_THRESHOLD = 0.002  # ±0.2% fiyat yatay sayılır
+
+# Volatility Compression
+ATR_PERIOD = 14
+BB_PERIOD = 20
+BB_STD = 2
+COMPRESSION_PERCENTILE = 25  # Alt %25'lik dilim
+
+# Order Book Absorption
+ABSORPTION_WINDOW_MINUTES = 10
+ASK_REDUCTION_THRESHOLD = 0.30  # %30 azalma
+PRICE_STABILITY_THRESHOLD = 0.003  # ±0.3%
+
+# Flow Footprint
+FLOW_WINDOW_MINUTES = 10
+FLOW_SIGMA_THRESHOLD = 2.0  # Standart sapma eşiği
+
+# Context
+SOCIAL_SILENCE_THRESHOLD = 0.3  # Mention oranı (normal günlere göre)
+KAP_LOOKBACK_DAYS = 7
+
+# ==================== SKORLAMA SİSTEMİ ====================
+# Maksimum puanlar
+MAX_ACCUMULATION = 30
+MAX_VOLATILITY = 20
+MAX_ABSORPTION = 25
+MAX_FLOW = 15
+MAX_CONTEXT = 10
+MAX_TOTAL = 100
+
+# Eşikler
+SCORE_THRESHOLD_VERY_HIGH = 75  # 🔥
+SCORE_THRESHOLD_HIGH = 60       # 🟠
+SCORE_THRESHOLD_MEDIUM = 45     # 🟡
+# < 45 = 🟢 Düşük
+
+# ==================== RİSK KORUMASI ====================
+ILLIQUID_VOLUME_THRESHOLD = 10_000_000  # 10M TL altı çok düşük
+ILLIQUID_SPREAD_THRESHOLD = 3.0  # %3 üstü spread riskli
+
+# ==================== BAŞLAMA ALARMI ====================
+START_VOLUME_MULTIPLIER = 3.0  # ADV'nin 3 katı
+START_PRICE_CHANGE = 0.01  # %1 yukarı
+
+# ==================== TELEGRAM ====================
+TELEGRAM_ENABLED = True
+TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+TELEGRAM_CHAT_ID = "YOUR_CHAT_ID_HERE"
+
+# ==================== VERİ KAYNAKLARI ====================
+# Bu kısımlar gerçek API'lerinize göre güncellenmelidir
+DATA_SOURCE = "mock"  # "mock", "api", "database"
+API_BASE_URL = "https://api.example.com"
+API_KEY = "YOUR_API_KEY"
+
+# ==================== LOGGING ====================
+LOG_LEVEL = "INFO"
+LOG_FILE = "pmr_bot.log"
+
+"""
+BIST PMR v1.0 - Veri Yönetim Modülü
+OHLCV, L2 Order Book, Trade Prints verilerini çeker
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+import requests
+from pmr_config import *
+
+
+class DataProvider:
+    """Veri sağlayıcı - gerçek API'lerle değiştirilebilir"""
+    
+    def __init__(self, source: str = "mock"):
+        self.source = source
+        
+    def get_ohlcv(self, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
+        """
+        OHLCV verisi çeker
+        
+        Args:
+            symbol: Hisse kodu (ör: "THYAO")
+            timeframe: "1m", "5m", "1d"
+            bars: Kaç bar geriye gidilecek
+            
+        Returns:
+            DataFrame: columns=[timestamp, open, high, low, close, volume]
+        """
+        if self.source == "mock":
+            return self._mock_ohlcv(symbol, timeframe, bars)
+        elif self.source == "api":
+            return self._api_ohlcv(symbol, timeframe, bars)
+        else:
+            raise ValueError(f"Unknown source: {self.source}")
+    
+    def get_orderbook_snapshot(self, symbol: str, depth: int = 5) -> Dict:
+        """
+        L2 Order Book snapshot çeker
+        
+        Args:
+            symbol: Hisse kodu
+            depth: Kaç kademe (bid/ask)
+            
+        Returns:
+            dict: {
+                'bids': [(price, size), ...],
+                'asks': [(price, size), ...],
+                'timestamp': datetime
+            }
+        """
+        if self.source == "mock":
+            return self._mock_orderbook(symbol, depth)
+        elif self.source == "api":
+            return self._api_orderbook(symbol, depth)
+        else:
+            return None
+    
+    def get_trade_prints(self, symbol: str, minutes: int = 10) -> pd.DataFrame:
+        """
+        Trade prints (işlem akışı) çeker
+        
+        Args:
+            symbol: Hisse kodu
+            minutes: Son kaç dakika
+            
+        Returns:
+            DataFrame: columns=[timestamp, price, size, side (buy/sell estimate)]
+        """
+        if self.source == "mock":
+            return self._mock_prints(symbol, minutes)
+        elif self.source == "api":
+            return self._api_prints(symbol, minutes)
+        else:
+            return pd.DataFrame()
+    
+    def get_universe(self) -> List[str]:
+        """Taranacak hisse listesini döner (likidite filtreli)"""
+        if self.source == "mock":
+            # Mock evren - gerçekte tüm BIST hisseleri
+            return ["THYAO", "GARAN", "ISCTR", "SISE", "PETKM", 
+                    "EREGL", "AKBNK", "KCHOL", "SAHOL", "TUPRS",
+                    "SMALLCAP1", "SMALLCAP2"]  # Son ikisi küçük tahta simülasyonu
+        elif self.source == "api":
+            return self._api_universe()
+        else:
+            return []
+    
+    def get_daily_stats(self, symbol: str) -> Dict:
+        """Günlük istatistikler (hacim, spread, vb.)"""
+        daily = self.get_ohlcv(symbol, "1d", 1)
+        if daily.empty:
+            return {}
+        
+        return {
+            'volume_tl': daily.iloc[-1]['volume'] * daily.iloc[-1]['close'],
+            'avg_volume_20d': daily['volume'].tail(20).mean() * daily['close'].tail(20).mean(),
+            'last_price': daily.iloc[-1]['close'],
+            'spread_pct': 0.5  # Mock - gerçekte bid/ask'ten hesaplanır
+        }
+    
+    # ==================== MOCK IMPLEMENTATIONS ====================
+    
+    def _mock_ohlcv(self, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
+        """Mock OHLCV data generator"""
+        np.random.seed(hash(symbol) % 10000)
+        
+        # Timeframe'e göre başlangıç
+        if timeframe == "1m":
+            freq = "1min"
+            end = datetime.now()
+        elif timeframe == "5m":
+            freq = "5min"
+            end = datetime.now()
+        elif timeframe == "1d":
+            freq = "1D"
+            end = datetime.now()
+        else:
+            raise ValueError(f"Unknown timeframe: {timeframe}")
+        
+        # Tarih aralığı
+        dates = pd.date_range(end=end, periods=bars, freq=freq)
+        
+        # Base fiyat
+        base_price = np.random.uniform(10, 100)
+        
+        # Fiyat hareketi oluştur
+        returns = np.random.randn(bars) * 0.002  # %0.2 volatilite
+        prices = base_price * np.exp(np.cumsum(returns))
+        
+        # OHLC oluştur
+        df = pd.DataFrame({
+            'timestamp': dates,
+            'open': prices * (1 + np.random.randn(bars) * 0.001),
+            'high': prices * (1 + abs(np.random.randn(bars)) * 0.002),
+            'low': prices * (1 - abs(np.random.randn(bars)) * 0.002),
+            'close': prices,
+            'volume': np.random.randint(100000, 1000000, bars)
+        })
+        
+        # Son barlarda "sıkışma" simülasyonu (bazı semboller için)
+        if "SMALLCAP" in symbol:
+            df.iloc[-20:, 1:5] = df.iloc[-20:, 1:5].mean()  # Fiyat yatay
+            df.iloc[-20:, 5] *= 0.3  # Hacim düşük
+        
+        return df
+    
+    def _mock_orderbook(self, symbol: str, depth: int) -> Dict:
+        """Mock order book"""
+        np.random.seed(hash(symbol + str(datetime.now().second)) % 10000)
+        
+        mid_price = np.random.uniform(10, 100)
+        tick = mid_price * 0.001
+        
+        bids = [(mid_price - tick * (i + 1), np.random.randint(1000, 50000)) 
+                for i in range(depth)]
+        asks = [(mid_price + tick * (i + 1), np.random.randint(1000, 50000)) 
+                for i in range(depth)]
+        
+        return {
+            'bids': bids,
+            'asks': asks,
+            'timestamp': datetime.now()
+        }
+    
+    def _mock_prints(self, symbol: str, minutes: int) -> pd.DataFrame:
+        """Mock trade prints"""
+        np.random.seed(hash(symbol) % 10000)
+        
+        n_trades = np.random.randint(50, 200)
+        now = datetime.now()
+        
+        times = [now - timedelta(minutes=minutes) + timedelta(seconds=np.random.randint(0, minutes * 60))
+                 for _ in range(n_trades)]
+        times.sort()
+        
+        mid_price = np.random.uniform(10, 100)
+        
+        df = pd.DataFrame({
+            'timestamp': times,
+            'price': mid_price * (1 + np.random.randn(n_trades) * 0.001),
+            'size': np.random.randint(100, 5000, n_trades),
+            'side': np.random.choice(['buy', 'sell'], n_trades)
+        })
+        
+        return df
+    
+    # ==================== API IMPLEMENTATIONS (Placeholder) ====================
+    
+    def _api_ohlcv(self, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
+        """
+        Gerçek API implementasyonu
+        Örnek: https://api.example.com/ohlcv?symbol=THYAO&tf=1m&bars=120
+        """
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/ohlcv",
+                params={
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'bars': bars,
+                    'api_key': API_KEY
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            return pd.DataFrame(data)
+        except Exception as e:
+            print(f"API error for {symbol}: {e}")
+            return pd.DataFrame()
+    
+    def _api_orderbook(self, symbol: str, depth: int) -> Dict:
+        """Gerçek L2 API implementasyonu"""
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/orderbook",
+                params={'symbol': symbol, 'depth': depth, 'api_key': API_KEY},
+                timeout=5
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"Orderbook API error for {symbol}: {e}")
+            return None
+    
+    def _api_prints(self, symbol: str, minutes: int) -> pd.DataFrame:
+        """Gerçek trade prints API implementasyonu"""
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/trades",
+                params={'symbol': symbol, 'minutes': minutes, 'api_key': API_KEY},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            return pd.DataFrame(data)
+        except Exception as e:
+            print(f"Trades API error for {symbol}: {e}")
+            return pd.DataFrame()
+    
+    def _api_universe(self) -> List[str]:
+        """Gerçek hisse listesi API'si"""
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/universe",
+                params={'min_volume': MIN_DAILY_VOLUME_TL, 'api_key': API_KEY},
+                timeout=10
+            )
+            response.raise_for_status()
+            return response.json()['symbols']
+        except Exception as e:
+            print(f"Universe API error: {e}")
+            return []
+
+
+class OrderBookTracker:
+    """Order book geçmişini takip eder (absorption için)"""
+    
+    def __init__(self, window_minutes: int = 15):
+        self.window_minutes = window_minutes
+        self.history = {}  # symbol -> [(timestamp, snapshot), ...]
+    
+    def add_snapshot(self, symbol: str, snapshot: Dict):
+        """Yeni snapshot ekle"""
+        if symbol not in self.history:
+            self.history[symbol] = []
+        
+        self.history[symbol].append((datetime.now(), snapshot))
+        
+        # Eski snapshot'ları temizle
+        cutoff = datetime.now() - timedelta(minutes=self.window_minutes)
+        self.history[symbol] = [(t, s) for t, s in self.history[symbol] if t > cutoff]
+    
+    def get_history(self, symbol: str) -> List[Tuple[datetime, Dict]]:
+        """Son X dakikanın geçmişini döner"""
+        return self.history.get(symbol, [])
+    
+    def calculate_ask_reduction(self, symbol: str) -> float:
+        """
+        Ask tarafındaki toplam lot azalmasını hesaplar
+        Returns: -1.0 ile 1.0 arası (negatif = azalma)
+        """
+        hist = self.get_history(symbol)
+        if len(hist) < 2:
+            return 0.0
+        
+        first_asks = sum(size for price, size in hist[0][1]['asks'])
+        last_asks = sum(size for price, size in hist[-1][1]['asks'])
+        
+        if first_asks == 0:
+            return 0.0
+        
+        return (last_asks - first_asks) / first_asks
+    
+    def calculate_bid_stability(self, symbol: str, level: int = 0) -> float:
+        """
+        Bid tarafındaki stabilitesini ölçer (aynı seviyede kalma)
+        Returns: 0-1 arası (1 = çok stabil)
+        """
+        hist = self.get_history(symbol)
+        if len(hist) < 3:
+            return 0.0
+        
+        prices = [snapshot['bids'][level][0] if len(snapshot['bids']) > level else 0 
+                  for _, snapshot in hist]
+        
+        if len(set(prices)) == 1 and prices[0] != 0:
+            return 1.0  # Tam stabil
+        
+        # Fiyat değişim oranı
+        std = np.std(prices)
+        mean = np.mean(prices)
+        if mean == 0:
+            return 0.0
+        
+        cv = std / mean  # Coefficient of variation
+        stability = max(0, 1 - cv * 10)  # Normalize
+        
+        return stability
+
+"""
+BIST PMR v1.0 - Teknik İndikatörler ve Feature Hesaplama
+OBV, ADL, ATR, Bollinger Bands, Slope hesaplamaları
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Tuple
+from pmr_config import *
+
+
+class TechnicalIndicators:
+    """Teknik indikatörler sınıfı"""
+    
+    @staticmethod
+    def calculate_obv(df: pd.DataFrame) -> pd.Series:
+        """
+        On Balance Volume (OBV)
+        
+        Args:
+            df: OHLCV DataFrame
+            
+        Returns:
+            Series: OBV değerleri
+        """
+        if df.empty or 'close' not in df.columns or 'volume' not in df.columns:
+            return pd.Series()
+        
+        obv = pd.Series(index=df.index, dtype=float)
+        obv.iloc[0] = df['volume'].iloc[0]
+        
+        for i in range(1, len(df)):
+            if df['close'].iloc[i] > df['close'].iloc[i - 1]:
+                obv.iloc[i] = obv.iloc[i - 1] + df['volume'].iloc[i]
+            elif df['close'].iloc[i] < df['close'].iloc[i - 1]:
+                obv.iloc[i] = obv.iloc[i - 1] - df['volume'].iloc[i]
+            else:
+                obv.iloc[i] = obv.iloc[i - 1]
+        
+        return obv
+    
+    @staticmethod
+    def calculate_adl(df: pd.DataFrame) -> pd.Series:
+        """
+        Accumulation/Distribution Line (ADL)
+        
+        Args:
+            df: OHLCV DataFrame
+            
+        Returns:
+            Series: ADL değerleri
+        """
+        if df.empty:
+            return pd.Series()
+        
+        # Money Flow Multiplier
+        clv = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'])
+        clv = clv.fillna(0)
+        
+        # Money Flow Volume
+        mfv = clv * df['volume']
+        
+        # ADL = cumulative MFV
+        adl = mfv.cumsum()
+        
+        return adl
+    
+    @staticmethod
+    def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """
+        Average True Range (ATR)
+        
+        Args:
+            df: OHLCV DataFrame
+            period: Periyod (default: 14)
+            
+        Returns:
+            Series: ATR değerleri
+        """
+        if df.empty or len(df) < period:
+            return pd.Series()
+        
+        high = df['high']
+        low = df['low']
+        close = df['close']
+        
+        # True Range hesapla
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        
+        # ATR = TR'nin hareketli ortalaması
+        atr = tr.rolling(window=period).mean()
+        
+        return atr
+    
+    @staticmethod
+    def calculate_bollinger_bands(df: pd.DataFrame, period: int = 20, 
+                                  std: float = 2) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        Bollinger Bands
+        
+        Args:
+            df: OHLCV DataFrame
+            period: Periyod (default: 20)
+            std: Standart sapma çarpanı (default: 2)
+            
+        Returns:
+            Tuple: (upper, middle, lower) bantlar
+        """
+        if df.empty or len(df) < period:
+            return pd.Series(), pd.Series(), pd.Series()
+        
+        middle = df['close'].rolling(window=period).mean()
+        rolling_std = df['close'].rolling(window=period).std()
+        
+        upper = middle + (rolling_std * std)
+        lower = middle - (rolling_std * std)
+        
+        return upper, middle, lower
+    
+    @staticmethod
+    def calculate_bb_width(df: pd.DataFrame, period: int = 20, std: float = 2) -> pd.Series:
+        """
+        Bollinger Band Width (sıkışma ölçütü)
+        
+        Args:
+            df: OHLCV DataFrame
+            period: Periyod
+            std: Standart sapma çarpanı
+            
+        Returns:
+            Series: BB Width değerleri
+        """
+        upper, middle, lower = TechnicalIndicators.calculate_bollinger_bands(df, period, std)
+        
+        if middle.empty:
+            return pd.Series()
+        
+        bbw = (upper - lower) / middle
+        return bbw
+    
+    @staticmethod
+    def calculate_slope(series: pd.Series, normalize: bool = True) -> float:
+        """
+        Linear regression slope hesaplar
+        
+        Args:
+            series: Zaman serisi
+            normalize: Slope'u normalize et (son değere böl)
+            
+        Returns:
+            float: Slope değeri
+        """
+        if series.empty or len(series) < 2:
+            return 0.0
+        
+        # NaN'leri temizle
+        clean_series = series.dropna()
+        if len(clean_series) < 2:
+            return 0.0
+        
+        x = np.arange(len(clean_series))
+        y = clean_series.values
+        
+        # Linear regression
+        if len(x) < 2:
+            return 0.0
+        
+        slope, _ = np.polyfit(x, y, 1)
+        
+        if normalize and clean_series.iloc[-1] != 0:
+            slope = slope / abs(clean_series.iloc[-1])
+        
+        return float(slope)
+    
+    @staticmethod
+    def calculate_rsi(df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """
+        Relative Strength Index (RSI)
+        
+        Args:
+            df: OHLCV DataFrame
+            period: Periyod
+            
+        Returns:
+            Series: RSI değerleri
+        """
+        if df.empty or len(df) < period + 1:
+            return pd.Series()
+        
+        delta = df['close'].diff()
+        
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        
+        avg_gain = gain.rolling(window=period).mean()
+        avg_loss = loss.rolling(window=period).mean()
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi
+    
+    @staticmethod
+    def calculate_percentile_rank(series: pd.Series, lookback: int = 20) -> float:
+        """
+        Son değerin lookback periyodundaki percentile rank'ini hesaplar
+        
+        Args:
+            series: Zaman serisi
+            lookback: Kaç bar geriye bakılacak
+            
+        Returns:
+            float: 0-100 arası percentile (50 = median)
+        """
+        if series.empty or len(series) < lookback:
+            return 50.0  # Default median
+        
+        recent = series.tail(lookback)
+        last_value = recent.iloc[-1]
+        
+        if pd.isna(last_value):
+            return 50.0
+        
+        rank = (recent < last_value).sum() / len(recent) * 100
+        
+        return float(rank)
+
+
+class FeatureExtractor:
+    """Feature çıkarım sınıfı"""
+    
+    def __init__(self):
+        self.ti = TechnicalIndicators()
+    
+    def extract_accumulation_features(self, df_5m: pd.DataFrame) -> dict:
+        """
+        Accumulation divergence feature'ları çıkarır
+        
+        Args:
+            df_5m: 5 dakikalık OHLCV DataFrame
+            
+        Returns:
+            dict: {
+                'price_slope': float,
+                'obv_slope': float,
+                'adl_slope': float,
+                'price_flat': bool,
+                'obv_rising': bool,
+                'adl_rising': bool
+            }
+        """
+        if df_5m.empty:
+            return self._empty_accumulation_features()
+        
+        # İndikatörleri hesapla
+        obv = self.ti.calculate_obv(df_5m)
+        adl = self.ti.calculate_adl(df_5m)
+        
+        # Slope'ları hesapla
+        price_slope = self.ti.calculate_slope(df_5m['close'])
+        obv_slope = self.ti.calculate_slope(obv)
+        adl_slope = self.ti.calculate_slope(adl)
+        
+        # Boolean bayraklar
+        price_flat = abs(price_slope) < PRICE_FLAT_THRESHOLD
+        obv_rising = obv_slope > 0
+        adl_rising = adl_slope > 0
+        
+        return {
+            'price_slope': price_slope,
+            'obv_slope': obv_slope,
+            'adl_slope': adl_slope,
+            'price_flat': price_flat,
+            'obv_rising': obv_rising,
+            'adl_rising': adl_rising
+        }
+    
+    def extract_volatility_features(self, df_5m: pd.DataFrame, 
+                                   df_daily: pd.DataFrame) -> dict:
+        """
+        Volatilite sıkışması feature'ları çıkarır
+        
+        Args:
+            df_5m: 5 dakikalık OHLCV
+            df_daily: Günlük OHLCV
+            
+        Returns:
+            dict: {
+                'atr_pct': float,
+                'atr_percentile': float,
+                'bbw': float,
+                'bbw_percentile': float,
+                'compressed': bool
+            }
+        """
+        if df_5m.empty or df_daily.empty:
+            return self._empty_volatility_features()
+        
+        # ATR hesapla (5m üzerinden)
+        atr = self.ti.calculate_atr(df_5m, ATR_PERIOD)
+        if atr.empty or df_5m['close'].iloc[-1] == 0:
+            return self._empty_volatility_features()
+        
+        atr_pct = (atr.iloc[-1] / df_5m['close'].iloc[-1]) * 100
+        
+        # BB Width hesapla
+        bbw = self.ti.calculate_bb_width(df_5m, BB_PERIOD, BB_STD)
+        if bbw.empty:
+            return self._empty_volatility_features()
+        
+        current_bbw = bbw.iloc[-1]
+        
+        # Günlük ATR ile karşılaştırma için
+        daily_atr = self.ti.calculate_atr(df_daily, ATR_PERIOD)
+        daily_atr_pct = (daily_atr / df_daily['close']) * 100
+        
+        atr_percentile = self.ti.calculate_percentile_rank(daily_atr_pct, 20)
+        
+        # BBW percentile
+        bbw_percentile = self.ti.calculate_percentile_rank(bbw, 20)
+        
+        # Sıkışma var mı?
+        compressed = (atr_percentile < COMPRESSION_PERCENTILE or 
+                     bbw_percentile < COMPRESSION_PERCENTILE)
+        
+        return {
+            'atr_pct': float(atr_pct),
+            'atr_percentile': float(atr_percentile),
+            'bbw': float(current_bbw) if not pd.isna(current_bbw) else 0.0,
+            'bbw_percentile': float(bbw_percentile),
+            'compressed': compressed
+        }
+    
+    def extract_absorption_features(self, ob_history: list) -> dict:
+        """
+        Order book absorption feature'ları çıkarır
+        
+        Args:
+            ob_history: [(timestamp, snapshot), ...] OrderBookTracker'dan
+            
+        Returns:
+            dict: {
+                'ask_reduction': float,
+                'bid_stability': float,
+                'absorption_detected': bool
+            }
+        """
+        if not ob_history or len(ob_history) < 2:
+            return {
+                'ask_reduction': 0.0,
+                'bid_stability': 0.0,
+                'absorption_detected': False
+            }
+        
+        # Ask reduction hesapla
+        first_asks = sum(size for price, size in ob_history[0][1]['asks'])
+        last_asks = sum(size for price, size in ob_history[-1][1]['asks'])
+        
+        ask_reduction = (last_asks - first_asks) / first_asks if first_asks > 0 else 0.0
+        
+        # Bid stability hesapla
+        bid_prices = [snapshot['bids'][0][0] if snapshot['bids'] else 0 
+                     for _, snapshot in ob_history]
+        bid_std = np.std(bid_prices)
+        bid_mean = np.mean(bid_prices)
+        bid_stability = 1 - (bid_std / bid_mean) if bid_mean > 0 else 0
+        bid_stability = max(0, min(1, bid_stability))
+        
+        # Absorption algılandı mı?
+        absorption_detected = (ask_reduction < -ASK_REDUCTION_THRESHOLD and 
+                              bid_stability > 0.7)
+        
+        return {
+            'ask_reduction': float(ask_reduction),
+            'bid_stability': float(bid_stability),
+            'absorption_detected': absorption_detected
+        }
+    
+    def extract_flow_features(self, prints_df: pd.DataFrame) -> dict:
+        """
+        Trade flow (işlem akışı) feature'ları çıkarır
+        
+        Args:
+            prints_df: Trade prints DataFrame
+            
+        Returns:
+            dict: {
+                'buy_volume': float,
+                'sell_volume': float,
+                'net_delta': float,
+                'net_delta_zscore': float,
+                'aggressive_buying': bool
+            }
+        """
+        if prints_df.empty:
+            return {
+                'buy_volume': 0.0,
+                'sell_volume': 0.0,
+                'net_delta': 0.0,
+                'net_delta_zscore': 0.0,
+                'aggressive_buying': False
+            }
+        
+        # Buy/sell volume'leri topla
+        buy_volume = prints_df[prints_df['side'] == 'buy']['size'].sum()
+        sell_volume = prints_df[prints_df['side'] == 'sell']['size'].sum()
+        
+        net_delta = buy_volume - sell_volume
+        
+        # Z-score hesapla (basit versiyon)
+        total_volume = buy_volume + sell_volume
+        if total_volume > 0:
+            net_delta_pct = net_delta / total_volume
+            # Basit z-score proxy (gerçekte rolling std gerekir)
+            net_delta_zscore = net_delta_pct * 10  # Scaled
+        else:
+            net_delta_zscore = 0.0
+        
+        # Agresif alım var mı?
+        aggressive_buying = net_delta_zscore > FLOW_SIGMA_THRESHOLD
+        
+        return {
+            'buy_volume': float(buy_volume),
+            'sell_volume': float(sell_volume),
+            'net_delta': float(net_delta),
+            'net_delta_zscore': float(net_delta_zscore),
+            'aggressive_buying': aggressive_buying
+        }
+    
+    def _empty_accumulation_features(self) -> dict:
+        return {
+            'price_slope': 0.0,
+            'obv_slope': 0.0,
+            'adl_slope': 0.0,
+            'price_flat': False,
+            'obv_rising': False,
+            'adl_rising': False
+        }
+    
+    def _empty_volatility_features(self) -> dict:
+        return {
+            'atr_pct': 0.0,
+            'atr_percentile': 50.0,
+            'bbw': 0.0,
+            'bbw_percentile': 50.0,
+            'compressed': False
+        }
+"""
+BIST PMR v1.0 - Skorlama Motoru
+A: Accumulation, V: Volatility, O: Order Book, F: Flow, C: Context
+"""
+
+import numpy as np
+from typing import Dict, Tuple
+from pmr_config import *
+
+
+class ScoringEngine:
+    """PMR Skorlama Motoru"""
+    
+    def __init__(self):
+        pass
+    
+    def score_accumulation(self, features: dict) -> Tuple[float, list]:
+        """
+        A: Accumulation Divergence Skorlama (0-30)
+        
+        Mantık:
+        - Fiyat yatay ama OBV/ADL yükseliyor → sessiz toplama
+        
+        Args:
+            features: extract_accumulation_features() çıktısı
+            
+        Returns:
+            (score, reasons): Score ve nedenleri
+        """
+        score = 0.0
+        reasons = []
+        
+        price_flat = features['price_flat']
+        obv_rising = features['obv_rising']
+        adl_rising = features['adl_rising']
+        
+        # Fiyat yatay + OBV yükseliyor
+        if price_flat and obv_rising:
+            score += 15
+            reasons.append(f"OBV↑ fiyat yatay (slope: {features['obv_slope']:.4f})")
+        
+        # Fiyat yatay + ADL yükseliyor
+        if price_flat and adl_rising:
+            score += 10
+            reasons.append(f"ADL↑ fiyat yatay (slope: {features['adl_slope']:.4f})")
+        
+        # Bonus: Her ikisi de yükseliyor
+        if obv_rising and adl_rising and price_flat:
+            score += 5
+            reasons.append("OBV ve ADL aynı anda↑")
+        
+        # Normalize edilmiş slope büyüklüğüne göre ek puan
+        obv_magnitude = abs(features['obv_slope'])
+        adl_magnitude = abs(features['adl_slope'])
+        
+        if obv_rising and obv_magnitude > 0.01:  # Güçlü OBV artışı
+            extra = min(3, obv_magnitude * 100)
+            score += extra
+        
+        if adl_rising and adl_magnitude > 0.01:  # Güçlü ADL artışı
+            extra = min(2, adl_magnitude * 100)
+            score += extra
+        
+        return min(score, MAX_ACCUMULATION), reasons
+    
+    def score_volatility(self, features: dict) -> Tuple[float, list]:
+        """
+        V: Volatility Compression Skorlama (0-20)
+        
+        Mantık:
+        - ATR ve BB Width düşük → sıkışma
+        
+        Args:
+            features: extract_volatility_features() çıktısı
+            
+        Returns:
+            (score, reasons): Score ve nedenleri
+        """
+        score = 0.0
+        reasons = []
+        
+        atr_percentile = features['atr_percentile']
+        bbw_percentile = features['bbw_percentile']
+        
+        # ATR düşük (alt %25)
+        if atr_percentile <= COMPRESSION_PERCENTILE:
+            score += 10
+            reasons.append(f"ATR düşük (percentile: {atr_percentile:.1f})")
+        
+        # BB Width düşük
+        if bbw_percentile <= COMPRESSION_PERCENTILE:
+            score += 10
+            reasons.append(f"BB Width düşük (percentile: {bbw_percentile:.1f})")
+        
+        # Çok düşük volatilite (alt %10)
+        if atr_percentile <= 10 or bbw_percentile <= 10:
+            score += 3
+            reasons.append("Ekstrem sıkışma")
+        
+        return min(score, MAX_VOLATILITY), reasons
+    
+    def score_absorption(self, features: dict, price_change: float) -> Tuple[float, list]:
+        """
+        O: Order Book Absorption Skorlama (0-25)
+        
+        Mantık:
+        - Ask tarafında lot azalıyor ama fiyat yükselmiyor → emilim
+        - Bid tarafında stabil duruş
+        
+        Args:
+            features: extract_absorption_features() çıktısı
+            price_change: Son N dakikadaki fiyat değişimi (%)
+            
+        Returns:
+            (score, reasons): Score ve nedenleri
+        """
+        score = 0.0
+        reasons = []
+        
+        if not features:
+            return 0.0, []
+        
+        ask_reduction = features['ask_reduction']
+        bid_stability = features['bid_stability']
+        
+        # Ask azalıyor + fiyat stabil → absorption
+        if ask_reduction < -ASK_REDUCTION_THRESHOLD:
+            ask_score = min(15, abs(ask_reduction) * 50)  # Scale
+            score += ask_score
+            reasons.append(f"Ask lot azalması: {ask_reduction:.1%}")
+            
+            # Fiyat çok az hareket ettiyse ekstra puan
+            if abs(price_change) < PRICE_STABILITY_THRESHOLD:
+                score += 5
+                reasons.append(f"Fiyat stabil: {price_change:.2%}")
+        
+        # Bid stability yüksek
+        if bid_stability > 0.7:
+            bid_score = min(10, bid_stability * 10)
+            score += bid_score
+            reasons.append(f"Bid stabilite: {bid_stability:.2f}")
+        
+        return min(score, MAX_ABSORPTION), reasons
+    
+    def score_flow(self, features: dict, price_change: float) -> Tuple[float, list]:
+        """
+        F: Flow Footprint Skorlama (0-15)
+        
+        Mantık:
+        - Agresif alımlar var ama fiyat bastırılıyor
+        
+        Args:
+            features: extract_flow_features() çıktısı
+            price_change: Son N dakikadaki fiyat değişimi (%)
+            
+        Returns:
+            (score, reasons): Score ve nedenleri
+        """
+        score = 0.0
+        reasons = []
+        
+        if not features or features['buy_volume'] == 0:
+            return 0.0, []
+        
+        net_delta_zscore = features['net_delta_zscore']
+        aggressive_buying = features['aggressive_buying']
+        
+        # Agresif alım var
+        if aggressive_buying:
+            flow_score = min(10, abs(net_delta_zscore) * 2)
+            score += flow_score
+            reasons.append(f"Agresif alım: z-score {net_delta_zscore:.2f}")
+            
+            # Fiyat yatay/düşüyor → bastırılıyor
+            if price_change < 0.005:  # %0.5'ten az artış
+                score += 5
+                reasons.append(f"Fiyat bastırılıyor: {price_change:.2%}")
+        
+        return min(score, MAX_FLOW), reasons
+    
+    def score_context(self, symbol: str, daily_stats: dict, 
+                     kap_count: int = 0, social_ratio: float = 1.0) -> Tuple[float, list]:
+        """
+        C: Context Skorlama (0-10)
+        
+        Mantık:
+        - Sosyal sessizlik
+        - KAP yok
+        - Küçük tahta / düşük likidite
+        
+        Args:
+            symbol: Hisse kodu
+            daily_stats: Günlük istatistikler
+            kap_count: Son X gündeki KAP sayısı
+            social_ratio: Sosyal medya konuşulma oranı (1.0 = normal)
+            
+        Returns:
+            (score, reasons): Score ve nedenleri
+        """
+        score = 0.0
+        reasons = []
+        
+        # Sosyal sessizlik
+        if social_ratio < SOCIAL_SILENCE_THRESHOLD:
+            score += 3
+            reasons.append(f"Sosyal sessizlik: {social_ratio:.2f}")
+        
+        # KAP yok
+        if kap_count == 0:
+            score += 2
+            reasons.append("Son günlerde KAP yok")
+        
+        # Küçük tahta / düşük likidite (proxy)
+        volume_tl = daily_stats.get('volume_tl', 0)
+        spread_pct = daily_stats.get('spread_pct', 0)
+        
+        if volume_tl < 50_000_000:  # 50M TL altı
+            score += 3
+            reasons.append(f"Düşük hacim: {volume_tl/1e6:.1f}M TL")
+        
+        if spread_pct > 1.0:  # Spread yüksek
+            score += 2
+            reasons.append(f"Geniş spread: {spread_pct:.2f}%")
+        
+        return min(score, MAX_CONTEXT), reasons
+    
+    def calculate_total_score(self, A: float, V: float, O: float, 
+                            F: float, C: float) -> Tuple[float, str]:
+        """
+        Toplam PMR skorunu hesaplar ve etiket döner
+        
+        Args:
+            A, V, O, F, C: Alt skorlar
+            
+        Returns:
+            (total_score, label): Toplam skor ve risk etiketi
+        """
+        total = A + V + O + F + C
+        
+        if total >= SCORE_THRESHOLD_VERY_HIGH:
+            label = "🔥 Hazırlık Çok Yüksek"
+        elif total >= SCORE_THRESHOLD_HIGH:
+            label = "🟠 Hazırlık Yüksek"
+        elif total >= SCORE_THRESHOLD_MEDIUM:
+            label = "🟡 Hazırlık Orta"
+        else:
+            label = "🟢 Düşük Risk"
+        
+        return total, label
+    
+    def check_false_positives(self, features_acc: dict, features_vol: dict,
+                             features_abs: dict, features_flow: dict,
+                             daily_stats: dict, kap_count: int) -> Tuple[bool, str]:
+        """
+        False Positive kontrolleri
+        
+        Returns:
+            (is_fp, reason): False positive ise True ve nedeni
+        """
+        
+        # FP-1: Normal sıkışma (divergence yok)
+        if (features_vol['compressed'] and 
+            not features_acc['obv_rising'] and 
+            not features_acc['adl_rising'] and
+            features_flow.get('net_delta_zscore', 0) < 1.0):
+            return True, "Normal sıkışma (divergence yok)"
+        
+        # FP-2: Haber öncesi
+        if kap_count > 2:  # Çok fazla KAP
+            return True, "Yakın zamanda çok KAP (event-driven olabilir)"
+        
+        # FP-3: Likidite tuzağı
+        volume_tl = daily_stats.get('volume_tl', 0)
+        spread_pct = daily_stats.get('spread_pct', 0)
+        
+        if volume_tl < ILLIQUID_VOLUME_THRESHOLD or spread_pct > ILLIQUID_SPREAD_THRESHOLD:
+            return True, f"İşlem yapılamaz likidite (vol: {volume_tl/1e6:.1f}M, spread: {spread_pct:.2f}%)"
+        
+        return False, ""
+
+
+class RiskGuard:
+    """Risk koruma ve filtreleme"""
+    
+    @staticmethod
+    def check_liquidity(daily_stats: dict) -> Tuple[bool, str]:
+        """
+        Likidite kontrolü
+        
+        Returns:
+            (tradeable, risk_note): İşlem yapılabilir mi, risk notu
+        """
+        volume_tl = daily_stats.get('volume_tl', 0)
+        spread_pct = daily_stats.get('spread_pct', 0)
+        
+        if volume_tl < ILLIQUID_VOLUME_THRESHOLD:
+            return False, f"⚫ ÇOK DÜŞÜK LİKİDİTE (işlem yasak)"
+        
+        if spread_pct > ILLIQUID_SPREAD_THRESHOLD:
+            return False, f"⚫ GENİŞ SPREAD (işlem riskli)"
+        
+        if volume_tl < MIN_DAILY_VOLUME_TL:
+            return True, "⚠️ Orta likidite (dikkatli ol)"
+        
+        return True, "✅ Likidite normal"
+    
+    @staticmethod
+    def check_manipulation_started(bars_1m: 'pd.DataFrame', 
+                                   avg_volume_1m: float) -> Tuple[bool, str]:
+        """
+        Manipülasyon başladı mı kontrolü
+        
+        Returns:
+            (started, message): Başladıysa True ve mesaj
+        """
+        if bars_1m.empty or len(bars_1m) < 2:
+            return False, ""
+        
+        # Son bar'ın hacmi
+        last_volume = bars_1m.iloc[-1]['volume']
+        
+        # Fiyat değişimi
+        price_change = (bars_1m.iloc[-1]['close'] - bars_1m.iloc[-2]['close']) / bars_1m.iloc[-2]['close']
+        
+        # Hacim spike
+        if last_volume > avg_volume_1m * START_VOLUME_MULTIPLIER:
+            if price_change > START_PRICE_CHANGE:
+                return True, "⚠️ PATLAMA BAŞLADI! Hacim spike + fiyat +%1"
+        
+        return False, ""
+"""
+BIST PMR v1.0 - Bildirim ve Watchlist Yönetimi
+Telegram bildirimleri, watchlist tutma, raporlama
+"""
+
+import json
+from datetime import datetime
+from typing import Dict, List
+import requests
+from pmr_config import *
+
+
+class TelegramNotifier:
+    """Telegram bildirici"""
+    
+    def __init__(self, bot_token: str = None, chat_id: str = None):
+        self.bot_token = bot_token or TELEGRAM_BOT_TOKEN
+        self.chat_id = chat_id or TELEGRAM_CHAT_ID
+        self.enabled = TELEGRAM_ENABLED and self.bot_token != "YOUR_BOT_TOKEN_HERE"
+    
+    def send_alert(self, symbol: str, score: float, label: str, 
+                   reasons: dict, risk_note: str = "") -> bool:
+        """
+        PMR alerti gönder
+        
+        Args:
+            symbol: Hisse kodu
+            score: PMR skoru
+            label: Risk etiketi
+            reasons: Alt skor nedenleri dict
+            risk_note: Ek risk notu
+            
+        Returns:
+            bool: Başarılı gönderim
+        """
+        if not self.enabled:
+            print(f"[Telegram] DISABLED - {symbol}: {score:.1f} {label}")
+            return False
+        
+        message = self._format_alert_message(symbol, score, label, reasons, risk_note)
+        
+        return self._send_message(message)
+    
+    def send_start_alert(self, symbol: str, message: str) -> bool:
+        """Manipülasyon başlama alerti"""
+        if not self.enabled:
+            print(f"[Telegram] START ALERT - {symbol}: {message}")
+            return False
+        
+        alert = f"🚨 BAŞLAMA ALARMI 🚨\n\n"
+        alert += f"Hisse: {symbol}\n"
+        alert += f"{message}\n\n"
+        alert += "⚠️ Hazırlık evresi bitti; risk yükseldi!"
+        
+        return self._send_message(alert)
+    
+    def _format_alert_message(self, symbol: str, score: float, label: str,
+                             reasons: dict, risk_note: str) -> str:
+        """Alert mesajını formatla"""
+        msg = "🧠 PMR ERKEN UYARI (Hazırlık Tespiti)\n\n"
+        msg += f"Hisse: {symbol}\n"
+        msg += f"PMR Score: {score:.1f} / 100 {label.split()[0]}\n"
+        msg += f"Etiket: {label}\n\n"
+        
+        msg += "📊 Nedenler:\n"
+        
+        # Accumulation
+        if reasons.get('A_reasons'):
+            msg += f"• Accumulation ({reasons['A']:.0f}p): "
+            msg += ", ".join(reasons['A_reasons']) + "\n"
+        
+        # Volatility
+        if reasons.get('V_reasons'):
+            msg += f"• Volatilite sıkışması ({reasons['V']:.0f}p): "
+            msg += ", ".join(reasons['V_reasons']) + "\n"
+        
+        # Absorption
+        if reasons.get('O_reasons'):
+            msg += f"• Orderbook emilim ({reasons['O']:.0f}p): "
+            msg += ", ".join(reasons['O_reasons']) + "\n"
+        
+        # Flow
+        if reasons.get('F_reasons'):
+            msg += f"• İşlem akışı ({reasons['F']:.0f}p): "
+            msg += ", ".join(reasons['F_reasons']) + "\n"
+        
+        # Context
+        if reasons.get('C_reasons'):
+            msg += f"• Context ({reasons['C']:.0f}p): "
+            msg += ", ".join(reasons['C_reasons']) + "\n"
+        
+        msg += f"\n{risk_note}\n"
+        
+        # Eylem notu
+        if score >= SCORE_THRESHOLD_VERY_HIGH:
+            msg += "\n✅ Watchlist öncelik 1"
+            msg += "\n⚠️ Patlama başladığında 'erken' biter; risk artar."
+        elif score >= SCORE_THRESHOLD_HIGH:
+            msg += "\n🔍 Yakından takip et"
+        
+        msg += f"\n\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        return msg
+    
+    def _send_message(self, text: str) -> bool:
+        """Telegram API ile mesaj gönder"""
+        try:
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            
+            payload = {
+                'chat_id': self.chat_id,
+                'text': text,
+                'parse_mode': 'HTML'
+            }
+            
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            
+            print(f"[Telegram] Mesaj gönderildi: {text[:50]}...")
+            return True
+            
+        except Exception as e:
+            print(f"[Telegram] Hata: {e}")
+            return False
+
+
+class Watchlist:
+    """Watchlist yönetimi"""
+    
+    def __init__(self, filepath: str = "pmr_watchlist.json"):
+        self.filepath = filepath
+        self.items = self._load()
+    
+    def add(self, symbol: str, score: float, label: str, 
+            reasons: dict, timestamp: datetime = None):
+        """Watchlist'e ekle"""
+        timestamp = timestamp or datetime.now()
+        
+        item = {
+            'symbol': symbol,
+            'score': score,
+            'label': label,
+            'reasons': reasons,
+            'timestamp': timestamp.isoformat(),
+            'active': True
+        }
+        
+        # Aynı sembol varsa güncelle
+        existing_idx = None
+        for idx, existing in enumerate(self.items):
+            if existing['symbol'] == symbol and existing['active']:
+                existing_idx = idx
+                break
+        
+        if existing_idx is not None:
+            # Skor artmışsa güncelle
+            if score > self.items[existing_idx]['score']:
+                self.items[existing_idx] = item
+                print(f"[Watchlist] {symbol} güncellendi: {score:.1f}")
+        else:
+            # Yeni ekle
+            self.items.append(item)
+            print(f"[Watchlist] {symbol} eklendi: {score:.1f}")
+        
+        self._save()
+    
+    def remove(self, symbol: str):
+        """Watchlist'ten çıkar (passive yap)"""
+        for item in self.items:
+            if item['symbol'] == symbol and item['active']:
+                item['active'] = False
+                print(f"[Watchlist] {symbol} pasif edildi")
+        
+        self._save()
+    
+    def get_active(self, min_score: float = 0) -> List[Dict]:
+        """Aktif watchlist itemlarını döner"""
+        return [item for item in self.items 
+                if item['active'] and item['score'] >= min_score]
+    
+    def get_top(self, n: int = 10) -> List[Dict]:
+        """En yüksek skorlu N hisseyi döner"""
+        active = self.get_active()
+        sorted_items = sorted(active, key=lambda x: x['score'], reverse=True)
+        return sorted_items[:n]
+    
+    def clear_old(self, hours: int = 24):
+        """Eski kayıtları temizle"""
+        cutoff = datetime.now().timestamp() - (hours * 3600)
+        
+        for item in self.items:
+            item_time = datetime.fromisoformat(item['timestamp']).timestamp()
+            if item_time < cutoff:
+                item['active'] = False
+        
+        self._save()
+        print(f"[Watchlist] {hours} saatten eski kayıtlar temizlendi")
+    
+    def _load(self) -> List[Dict]:
+        """Dosyadan yükle"""
+        try:
+            with open(self.filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return []
+        except Exception as e:
+            print(f"[Watchlist] Yükleme hatası: {e}")
+            return []
+    
+    def _save(self):
+        """Dosyaya kaydet"""
+        try:
+            with open(self.filepath, 'w', encoding='utf-8') as f:
+                json.dump(self.items, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[Watchlist] Kayıt hatası: {e}")
+    
+    def generate_report(self) -> str:
+        """Watchlist raporu oluştur"""
+        active = self.get_active(min_score=SCORE_THRESHOLD_MEDIUM)
+        
+        if not active:
+            return "📋 Watchlist boş (minimum skor: 45)\n"
+        
+        report = f"📋 PMR WATCHLIST RAPORU\n"
+        report += f"Tarih: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        report += f"Aktif hisse sayısı: {len(active)}\n\n"
+        
+        # Skor grupları
+        very_high = [x for x in active if x['score'] >= SCORE_THRESHOLD_VERY_HIGH]
+        high = [x for x in active if SCORE_THRESHOLD_HIGH <= x['score'] < SCORE_THRESHOLD_VERY_HIGH]
+        medium = [x for x in active if SCORE_THRESHOLD_MEDIUM <= x['score'] < SCORE_THRESHOLD_HIGH]
+        
+        if very_high:
+            report += "🔥 ÇOK YÜKSEK HAZIRLIK:\n"
+            for item in sorted(very_high, key=lambda x: x['score'], reverse=True):
+                report += f"  • {item['symbol']}: {item['score']:.1f}\n"
+            report += "\n"
+        
+        if high:
+            report += "🟠 YÜKSEK HAZIRLIK:\n"
+            for item in sorted(high, key=lambda x: x['score'], reverse=True):
+                report += f"  • {item['symbol']}: {item['score']:.1f}\n"
+            report += "\n"
+        
+        if medium:
+            report += "🟡 ORTA HAZIRLIK:\n"
+            for item in sorted(medium, key=lambda x: x['score'], reverse=True):
+                report += f"  • {item['symbol']}: {item['score']:.1f}\n"
+        
+        return report
+
+
+class Logger:
+    """Detaylı loglama"""
+    
+    def __init__(self, filepath: str = "pmr_detailed.log"):
+        self.filepath = filepath
+    
+    def log_scan(self, symbol: str, score: float, features: dict, 
+                 reasons: dict, timestamp: datetime = None):
+        """Tarama detayını logla"""
+        timestamp = timestamp or datetime.now()
+        
+        entry = {
+            'timestamp': timestamp.isoformat(),
+            'symbol': symbol,
+            'score': score,
+            'features': features,
+            'reasons': reasons
+        }
+        
+        try:
+            with open(self.filepath, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            print(f"[Logger] Hata: {e}")
+#!/usr/bin/env python3
+"""
+PMR Quick Test Script
+Botun temel fonksiyonlarını test eder
+"""
+
+import sys
+from pmr_scanner import PMRScanner
+from pmr_config import *
+
+
+def test_single_symbol():
+    """Tek hisse testi"""
+    print("\n" + "="*60)
+    print("TEST 1: Tek Hisse Tarama")
+    print("="*60)
+    
+    scanner = PMRScanner(data_source="mock")
+    result = scanner.scan_symbol("THYAO")
+    
+    if result:
+        print(f"✅ {result['symbol']}: Score={result['score']:.1f}, Label={result['label']}")
+        return True
+    else:
+        print("❌ Test başarısız")
+        return False
+
+
+def test_universe_scan():
+    """Evren tarama testi"""
+    print("\n" + "="*60)
+    print("TEST 2: Evren Tarama")
+    print("="*60)
+    
+    scanner = PMRScanner(data_source="mock")
+    results = scanner.scan_universe(notify=False)
+    
+    if results:
+        print(f"✅ {len(results)} hisse tarandı")
+        high_scores = [r for r in results if r['score'] >= 60]
+        print(f"   Yüksek skor (≥60): {len(high_scores)}")
+        return True
+    else:
+        print("❌ Test başarısız")
+        return False
+
+
+def test_features():
+    """Feature extraction testi"""
+    print("\n" + "="*60)
+    print("TEST 3: Feature Extraction")
+    print("="*60)
+    
+    from pmr_data import DataProvider
+    from pmr_features import FeatureExtractor
+    
+    provider = DataProvider(source="mock")
+    extractor = FeatureExtractor()
+    
+    df_5m = provider.get_ohlcv("THYAO", "5m", 60)
+    df_daily = provider.get_ohlcv("THYAO", "1d", 30)
+    
+    if df_5m.empty or df_daily.empty:
+        print("❌ Veri çekilemedi")
+        return False
+    
+    features_acc = extractor.extract_accumulation_features(df_5m)
+    features_vol = extractor.extract_volatility_features(df_5m, df_daily)
+    
+    print(f"✅ Accumulation features: {len(features_acc)} adet")
+    print(f"✅ Volatility features: {len(features_vol)} adet")
+    
+    print(f"\n   OBV slope: {features_acc['obv_slope']:.6f}")
+    print(f"   ADL slope: {features_acc['adl_slope']:.6f}")
+    print(f"   ATR percentile: {features_vol['atr_percentile']:.1f}")
+    
+    return True
+
+
+def test_scoring():
+    """Skorlama testi"""
+    print("\n" + "="*60)
+    print("TEST 4: Skorlama Motoru")
+    print("="*60)
+    
+    from pmr_scoring import ScoringEngine
+    
+    engine = ScoringEngine()
+    
+    # Mock features
+    features_acc = {
+        'price_flat': True,
+        'obv_rising': True,
+        'adl_rising': True,
+        'price_slope': 0.0001,
+        'obv_slope': 0.05,
+        'adl_slope': 0.03
+    }
+    
+    features_vol = {
+        'atr_percentile': 15.0,
+        'bbw_percentile': 12.0,
+        'compressed': True,
+        'atr_pct': 0.5,
+        'bbw': 0.02
+    }
+    
+    A, A_reasons = engine.score_accumulation(features_acc)
+    V, V_reasons = engine.score_volatility(features_vol)
+    
+    print(f"✅ Accumulation Score: {A:.1f} / {MAX_ACCUMULATION}")
+    print(f"   Reasons: {', '.join(A_reasons) if A_reasons else 'None'}")
+    
+    print(f"✅ Volatility Score: {V:.1f} / {MAX_VOLATILITY}")
+    print(f"   Reasons: {', '.join(V_reasons) if V_reasons else 'None'}")
+    
+    total, label = engine.calculate_total_score(A, V, 0, 0, 0)
+    print(f"\n✅ Total Score: {total:.1f} / 100")
+    print(f"   Label: {label}")
+    
+    return True
+
+
+def test_watchlist():
+    """Watchlist testi"""
+    print("\n" + "="*60)
+    print("TEST 5: Watchlist Yönetimi")
+    print("="*60)
+    
+    from pmr_notifier import Watchlist
+    
+    watchlist = Watchlist(filepath="test_watchlist.json")
+    
+    # Test ekle
+    watchlist.add("TEST1", 75.0, "🔥 Çok Yüksek", {'A': 30, 'V': 20})
+    watchlist.add("TEST2", 62.0, "🟠 Yüksek", {'A': 25, 'V': 15})
+    
+    active = watchlist.get_active()
+    print(f"✅ Watchlist'e eklendi: {len(active)} item")
+    
+    top = watchlist.get_top(5)
+    print(f"✅ Top items: {[x['symbol'] for x in top]}")
+    
+    # Temizle
+    import os
+    if os.path.exists("test_watchlist.json"):
+        os.remove("test_watchlist.json")
+    
+    return True
+
+
+def run_all_tests():
+    """Tüm testleri çalıştır"""
+    print("\n" + "="*70)
+    print(" "*15 + "PMR BOT TEST SÜİTİ")
+    print("="*70)
+    
+    tests = [
+        ("Tek Hisse Tarama", test_single_symbol),
+        ("Evren Tarama", test_universe_scan),
+        ("Feature Extraction", test_features),
+        ("Skorlama Motoru", test_scoring),
+        ("Watchlist Yönetimi", test_watchlist)
+    ]
+    
+    results = []
+    
+    for name, test_func in tests:
+        try:
+            success = test_func()
+            results.append((name, success))
+        except Exception as e:
+            print(f"\n❌ {name} - HATA: {e}")
+            import traceback
+            traceback.print_exc()
+            results.append((name, False))
+    
+    # Özet
+    print("\n" + "="*70)
+    print("TEST ÖZETİ")
+    print("="*70)
+    
+    passed = sum(1 for _, success in results if success)
+    total = len(results)
+    
+    for name, success in results:
+        status = "✅ BAŞARILI" if success else "❌ BAŞARISIZ"
+        print(f"  {name:25s} ... {status}")
+    
+    print(f"\n  Toplam: {passed}/{total} test başarılı")
+    
+    if passed == total:
+        print("\n  🎉 TÜM TESTLER BAŞARILI! Bot hazır.")
+        return 0
+    else:
+        print(f"\n  ⚠️  {total - passed} test başarısız. Lütfen kontrol edin.")
+        return 1
+
+
+if __name__ == "__main__":
+    exit_code = run_all_tests()
+    sys.exit(exit_code)
+
+pandas>=1.5.0
+numpy>=1.23.0
+requests>=2.28.0
+
+# BIST Pre-Manipulation Radar (PMR) v1.0
+
+## 📋 Genel Bakış
+
+BIST Pre-Manipulation Radar (PMR), Borsa İstanbul’da manipülasyon **hazırlık** evresindeki hisseleri tespit etmek için geliştirilmiş erken uyarı sistemidir.
+
+### 🎯 Amaç
+
+Manipülasyon genelde şu evrelerde gerçekleşir:
+
+1. **Hazırlık (Sessiz)** ← PMR burada devreye girer
+1. **Başlama (İlk Hareket)**
+1. **Patlama (Herkes Görür)** ← Artık geç
+
+PMR, 1. evrede “sessiz toplama”, “volatilite sıkışması”, “emir defteri emilimi” gibi sinyalleri yakalayarak erken uyarı verir.
+
+-----
+
+## 🔧 Kurulum
+
+### Gereksinimler
+
+- Python 3.8+
+- pip
+
+### Adımlar
+
+```bash
+# 1. Kütüphaneleri yükle
+pip install -r requirements.txt
+
+# 2. Konfigürasyonu düzenle (opsiyonel)
+# pmr_config.py dosyasını açıp ayarları düzenleyin
+nano pmr_config.py
+
+# 3. Çalıştır
+python main.py
+```
+
+-----
+
+## 🚀 Kullanım
+
+### Modlar
+
+#### 1. Sürekli Tarama (Varsayılan)
+
+```bash
+python main.py continuous
+```
+
+- Her 2 dakikada bir tüm evreni tarar
+- Yüksek skorlu hisseleri Telegram’a bildirir
+- Watchlist’e otomatik ekler
+
+#### 2. Tek Hisse Tarama
+
+```bash
+python main.py single THYAO
+```
+
+- Belirtilen hisseyi tek seferlik tarar
+- Detaylı sonuç gösterir
+
+#### 3. Evren Tarama (Bir Kez)
+
+```bash
+python main.py scan
+```
+
+- Tüm evreni bir kez tarar
+- Özet rapor verir
+
+#### 4. Watchlist Raporu
+
+```bash
+python main.py report
+```
+
+- Mevcut watchlist’i gösterir
+- Top 10 yüksek skorlu hisseleri listeler
+
+-----
+
+## 📊 Skorlama Sistemi
+
+PMR, 0-100 arası skor üretir:
+
+### Alt Skorlar (Toplam: 100)
+
+|Modül               |Maksimum|Açıklama                               |
+|--------------------|--------|---------------------------------------|
+|**A** - Accumulation|30      |OBV/ADL ve fiyat ayrışması             |
+|**V** - Volatility  |20      |ATR ve BB sıkışması                    |
+|**O** - Order Book  |25      |L2 emilim/baskı (L2 varsa)             |
+|**F** - Flow        |15      |İşlem akışı dengesizliği (prints varsa)|
+|**C** - Context     |10      |Sosyal sessizlik, KAP, likidite profili|
+
+### Etiketler
+
+|Skor |Etiket               |Anlamı             |
+|-----|---------------------|-------------------|
+|≥75  |🔥 Hazırlık Çok Yüksek|Watchlist öncelik 1|
+|60-74|🟠 Hazırlık Yüksek    |Yakından takip et  |
+|45-59|🟡 Hazırlık Orta      |İzle               |
+|<45  |🟢 Düşük Risk         |Normal             |
+
+-----
+
+## 🔍 Modüller Detay
+
+### A: Accumulation Divergence (0-30)
+
+**Amaç:** Sessiz toplama var mı?
+
+**Mantık:**
+
+- Fiyat yatay (slope ~0)
+- OBV yükseliyor (slope > 0)
+- ADL yükseliyor (slope > 0)
+
+**Puanlama:**
+
+- Fiyat yatay + OBV↑: +15
+- Fiyat yatay + ADL↑: +10
+- Her ikisi de↑: +5 bonus
+
+### V: Volatility Compression (0-20)
+
+**Amaç:** Tahta sıkışmış mı?
+
+**Mantık:**
+
+- ATR düşük (son 20 günün alt %25’i)
+- Bollinger Band Width düşük
+
+**Puanlama:**
+
+- ATR düşük: +10
+- BBW düşük: +10
+
+### O: Order Book Absorption (0-25)
+
+**Amaç:** Satış emiliyor mu?
+
+**Mantık:**
+
+- Ask tarafında lot azalması (-%30+)
+- Fiyat yatay/stabil
+- Bid tarafında stabilite
+
+**Puanlama:**
+
+- Ask azalması + fiyat stabil: +15
+- Bid stabilite: +10
+
+### F: Flow Footprint (0-15)
+
+**Amaç:** Agresif alım var ama fiyat bastırılıyor mu?
+
+**Mantık:**
+
+- Net delta pozitif yüksek (z-score > 2)
+- Fiyat yükselmiyor
+
+**Puanlama:**
+
+- Agresif alım + fiyat bastırılıyor: +15
+
+### C: Context (0-10)
+
+**Amaç:** Hazırlık için uygun zemin var mı?
+
+**Puanlama:**
+
+- Sosyal sessizlik: +3
+- KAP yok: +2
+- Düşük likidite: +5
+
+-----
+
+## ⚙️ Konfigürasyon
+
+`pmr_config.py` dosyasında ayarlanabilir parametreler:
+
+### Tarama Ayarları
+
+```python
+SCAN_INTERVAL_SECONDS = 120  # Tarama aralığı
+MIN_DAILY_VOLUME_TL = 30_000_000  # Minimum günlük hacim
+```
+
+### Telegram Ayarları
+
+```python
+TELEGRAM_ENABLED = True
+TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN"
+TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"
+```
+
+### Skor Eşikleri
+
+```python
+SCORE_THRESHOLD_VERY_HIGH = 75
+SCORE_THRESHOLD_HIGH = 60
+SCORE_THRESHOLD_MEDIUM = 45
+```
+
+-----
+
+## 📡 Veri Kaynakları
+
+### Gerekli Veriler (Minimum)
+
+- ✅ 1dk/5dk OHLCV
+- ✅ Günlük OHLCV
+
+### Opsiyonel (Gücü Artırır)
+
+- L2 Order Book (O modülü için)
+- Trade Prints (F modülü için)
+- KAP Akışı (C modülü için)
+- Sosyal medya (C modülü için)
+
+### Mock Mode
+
+Şu an bot **mock mode**’da çalışıyor (test verisi). Gerçek veri entegrasyonu için:
+
+1. `pmr_data.py` → `_api_ohlcv()`, `_api_orderbook()` fonksiyonlarını doldurun
+1. `pmr_config.py` → `DATA_SOURCE = "api"` yapın
+1. API key’leri girin
+
+-----
+
+## 🛡️ False Positive Koruması
+
+PMR, yanlış alarm riskini azaltmak için çeşitli filtreler içerir:
+
+### FP-1: Normal Sıkışma
+
+Sıkışma var ama divergence yoksa → skor kırılır
+
+### FP-2: Haber Öncesi
+
+Çok fazla KAP varsa → event-driven olabilir uyarısı
+
+### FP-3: Likidite Tuzağı
+
+Spread çok geniş veya hacim çok düşük → işlem yasak etiketi
+
+-----
+
+## 📈 Örnek Çıktı
+
+### Telegram Bildirimi
+
+```
+🧠 PMR ERKEN UYARI (Hazırlık Tespiti)
+
+Hisse: SMALLCAP1
+PMR Score: 78.0 / 100 🔥
+Etiket: 🔥 Hazırlık Çok Yüksek
+
+📊 Nedenler:
+• Accumulation (27p): OBV↑ fiyat yatay (slope: 0.0123), ADL↑ fiyat yatay (slope: 0.0098), OBV ve ADL aynı anda↑
+• Volatilite sıkışması (18p): ATR düşük (percentile: 12.5), BB Width düşük (percentile: 8.3)
+• Context (11p): Düşük hacim: 15.0M TL, Geniş spread: 1.50%
+
+⚠️ Orta likidite (dikkatli ol)
+
+✅ Watchlist öncelik 1
+⚠️ Patlama başladığında 'erken' biter; risk artar.
+
+⏰ 2025-12-12 14:30:45
+```
+
+### Watchlist Raporu
+
+```
+📋 PMR WATCHLIST RAPORU
+Tarih: 2025-12-12 14:35:00
+Aktif hisse sayısı: 3
+
+🔥 ÇOK YÜKSEK HAZIRLIK:
+  • SMALLCAP1: 78.0
+  • SMALLCAP2: 76.5
+
+🟠 YÜKSEK HAZIRLIK:
+  • THYAO: 62.3
+```
+
+-----
+
+## 🚨 Başlama Alarmı
+
+PMR, hazırlık evresinden sonra **başlama**yı da algılar:
+
+### Tetikleyiciler
+
+- Hacim spike (≥3× ortalama)
+- Fiyat +%1+ hareket
+- L2’de hızlı iptal artışı (opsiyonel)
+
+### Alarm Mesajı
+
+```
+🚨 BAŞLAMA ALARMI 🚨
+
+Hisse: SMALLCAP1
+⚠️ PATLAMA BAŞLADI! Hacim spike + fiyat +%1
+
+⚠️ Hazırlık evresi bitti; risk yükseldi!
+```
+
+-----
+
+## 📁 Dosya Yapısı
+
+```
+.
+├── main.py                 # Ana çalıştırma scripti
+├── pmr_config.py          # Konfigürasyon
+├── pmr_data.py            # Veri sağlayıcı
+├── pmr_features.py        # Feature çıkarımı
+├── pmr_scoring.py         # Skorlama motoru
+├── pmr_notifier.py        # Telegram & watchlist
+├── pmr_scanner.py         # Ana tarayıcı
+├── requirements.txt       # Bağımlılıklar
+├── README.md              # Bu dosya
+├── pmr_watchlist.json     # Watchlist (otomatik oluşur)
+└── pmr_detailed.log       # Detaylı loglar (otomatik oluşur)
+```
+
+-----
+
+## ⚖️ Yasal Uyarı
+
+**ÖNEMLİ:**
+
+- Bu yazılım yalnızca **eğitim ve araştırma** amaçlıdır
+- Finansal tavsiye değildir
+- Manipülasyon yasadışıdır - bu bot manipülasyon yapmaz, tespit etmeye çalışır
+- Gerçek yatırım kararlarında kullanmadan önce profesyonel danışmanlık alın
+- Yazarlar, bu yazılımın kullanımından doğacak hiçbir zarardan sorumlu değildir
+
+-----
+
+## 🤝 Katkıda Bulunma
+
+Geliştirmeler için öneriler:
+
+- Daha gelişmiş ML modelleri (LSTM, Transformer)
+- Gerçek zamanlı L2 streaming
+- Sosyal medya sentiment analizi
+- KAP otomatik parse
+- Web dashboard
+
+-----
+
+## 📞 Destek
+
+Sorularınız için:
+
+- GitHub Issues kullanın
+- Dökümentasyonu okuyun
+- pmr_config.py ayarlarını kontrol edin
+
+-----
+
+## 📝 Lisans
+
+Bu proje MIT lisansı altında yayınlanmıştır.
+
+-----
+
+**v1.0 - İlk Sürüm**
+*Son güncelleme: Aralık 2025*
