@@ -123,16 +123,29 @@ class DataProvider:
     
     def get_daily_stats(self, symbol: str) -> Dict:
         """Günlük istatistikler (hacim, spread, vb.)"""
-        daily = self.get_ohlcv(symbol, "1d", 1)
+        # 20 günlük veri çek (ortalama hacim için)
+        daily = self.get_ohlcv(symbol, "1d", 20)
         if daily.empty:
             return {}
         
-        return {
-            'volume_tl': daily.iloc[-1]['volume'] * daily.iloc[-1]['close'],
-            'avg_volume_20d': daily['volume'].tail(20).mean() * daily['close'].tail(20).mean(),
-            'last_price': daily.iloc[-1]['close'],
-            'spread_pct': 0.5  # Mock - gerçekte bid/ask'ten hesaplanır
+        # Son gün verisi
+        last_bar = daily.iloc[-1]
+        
+        # Ortalama hacim (TL)
+        daily_vol_tl = daily['volume'] * daily['close']
+        avg_vol_20d = daily_vol_tl.mean()
+        
+        stats = {
+            'volume_tl': last_bar['volume'] * last_bar['close'],
+            'avg_volume_20d': avg_vol_20d,
+            'last_price': last_bar['close'],
+            'spread_pct': 0.0
         }
+        
+        if self.source == "mock":
+            stats['spread_pct'] = 0.5
+            
+        return stats
     
     # ==================== MOCK IMPLEMENTATIONS ====================
     
