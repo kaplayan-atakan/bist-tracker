@@ -68,7 +68,7 @@ TELEGRAM_CHAT_ID="5883922751"
 
 # ==================== VERİ KAYNAKLARI ====================
 # Bu kısımlar gerçek API'lerinize göre güncellenmelidir
-DATA_SOURCE = os.getenv("DATA_SOURCE", "mock")  # "mock", "api", "yfinance"
+DATA_SOURCE = os.getenv("DATA_SOURCE", "yfinance")  # "mock", "api", "yfinance"
 API_BASE_URL = "https://api.example.com"
 API_KEY = "YOUR_API_KEY"
 

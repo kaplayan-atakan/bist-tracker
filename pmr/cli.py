@@ -215,7 +215,7 @@ def main():
     
     parser.add_argument(
         '--source',
-        choices=['mock', 'api'],
+        choices=['mock', 'api', 'yfinance'],
         default=DATA_SOURCE,
         help='Veri kaynağı (varsayılan: config dosyasından)'
     )
