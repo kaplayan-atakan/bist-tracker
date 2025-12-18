@@ -5,6 +5,8 @@ OHLCV, L2 Order Book, Trade Prints verilerini çeker
 
 import pandas as pd
 import numpy as np
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import requests
@@ -89,7 +91,27 @@ class DataProvider:
         elif self.source == "api":
             return self._api_universe()
         elif self.source == "yfinance":
-            # Örnek BIST 30/100 listesi
+            # Try to load from bist_symbols_validated.json
+            # Proje kök dizininde ara
+            possible_paths = [
+                "bist_symbols_validated.json",
+                "../bist_symbols_validated.json",
+                os.path.join(os.getcwd(), "bist_symbols_validated.json")
+            ]
+            
+            for json_path in possible_paths:
+                if os.path.exists(json_path):
+                    try:
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            if "stocks" in data:
+                                print(f"[PMR] Evren yüklendi: {len(data['stocks'])} hisse ({json_path})")
+                                return data["stocks"]
+                    except Exception as e:
+                        print(f"[PMR] JSON yükleme hatası ({json_path}): {e}")
+            
+            # Fallback to hardcoded list
+            print("[PMR] Uyarı: JSON bulunamadı, varsayılan liste kullanılıyor.")
             return ["THYAO", "GARAN", "ISCTR", "SISE", "PETKM", 
                     "EREGL", "AKBNK", "KCHOL", "SAHOL", "TUPRS",
                     "ASELS", "BIMAS", "EKGYO", "FROTO", "HEKTS",

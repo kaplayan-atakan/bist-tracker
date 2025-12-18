@@ -63,8 +63,8 @@ START_PRICE_CHANGE = 0.01  # %1 yukarı
 
 # ==================== TELEGRAM ====================
 TELEGRAM_ENABLED = True
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID_HERE")
+TELEGRAM_BOT_TOKEN="7611453017:AAFAz9jBsUQ-N6RUdQ8pnct0gIzV2UeEmIM"
+TELEGRAM_CHAT_ID="5883922751"
 
 # ==================== VERİ KAYNAKLARI ====================
 # Bu kısımlar gerçek API'lerinize göre güncellenmelidir

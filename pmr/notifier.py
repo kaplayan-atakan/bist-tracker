@@ -63,6 +63,29 @@ class TelegramNotifier:
         alert += "⚠️ Hazırlık evresi bitti; risk yükseldi!"
         
         return self._send_message(alert)
+
+    def send_startup_message(self, universe_size: int) -> bool:
+        """Bot açılış mesajı"""
+        if not self.enabled:
+            return False
+            
+        msg = "🧠 *PMR Bot Başlatıldı* v1.0\n\n"
+        msg += f"📡 Veri Kaynağı: {DATA_SOURCE.upper()}\n"
+        msg += f"🔍 Takip: {universe_size} sembol\n"
+        msg += f"⏱️ Tarama Aralığı: {SCAN_INTERVAL_SECONDS} sn\n\n"
+        msg += "Manipülasyon hazırlığı (toplama/sıkışma) tespit edildiğinde bildirim gönderilecektir."
+        
+        return self._send_message(msg)
+
+    def send_shutdown_message(self) -> bool:
+        """Bot kapanış mesajı"""
+        if not self.enabled:
+            return False
+            
+        msg = "🛑 *PMR Bot Kapatılıyor...*\n\n"
+        msg += "Bakım veya güncelleme nedeniyle servis durduruluyor."
+        
+        return self._send_message(msg)
     
     def _format_alert_message(self, symbol: str, score: float, label: str,
                              reasons: dict, risk_note: str) -> str:
@@ -120,7 +143,7 @@ class TelegramNotifier:
             payload = {
                 'chat_id': self.chat_id,
                 'text': text,
-                'parse_mode': 'HTML'
+                'parse_mode': 'Markdown'
             }
             
             response = requests.post(url, json=payload, timeout=10)

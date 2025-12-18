@@ -235,6 +235,10 @@ class PMRScanner:
         """
         print(f"[PMR] Sürekli tarama başlatılıyor (interval: {interval_seconds}s)")
         
+        # Başlangıç mesajı
+        universe_size = len(self.data_provider.get_universe())
+        self.telegram.send_startup_message(universe_size)
+        
         iteration = 0
         
         while True:
@@ -261,6 +265,8 @@ class PMRScanner:
                 
             except KeyboardInterrupt:
                 print("\n[PMR] Kullanıcı tarafından durduruldu")
+                # Kapanış mesajı
+                self.telegram.send_shutdown_message()
                 break
             except Exception as e:
                 print(f"[PMR] Ana döngü hatası: {e}")
